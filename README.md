@@ -23,8 +23,8 @@ What it does:
 ## Setup
 
 ```sh
-git clone <this-repo-url> ~/tools/claudeworkbenchscript
-cd ~/tools/claudeworkbenchscript
+git clone https://github.com/SmartScrubs/scrubs-ws-claude-workbench.git ~/tools/scrubs-ws-claude-workbench
+cd ~/tools/scrubs-ws-claude-workbench
 chmod +x ws
 
 # Put it on your PATH (choose one)
