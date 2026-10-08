@@ -3,14 +3,15 @@
 `ws` gives you a fresh clone of [SmartScrubs/scrubs](https://github.com/SmartScrubs/scrubs) on a new branch, then opens Claude Code in it.
 
 ```sh
-ws my-feature
+ws my-feature            # branch from the repo's default branch (currently `zenbu`)
+ws my-feature main       # branch from `main` instead
 ```
 
 What it does:
 
-1. Checks that the branch name is valid and that `claude` is on your `PATH`.
+1. Checks that the branch names are valid, that the base branch exists on GitHub, and that `claude` is on your `PATH`.
 2. Clones the repo into `./my-feature` (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). It stops if that folder already exists.
-3. Creates the branch and switches to it. If the branch already exists on `origin`, it checks that one out instead.
+3. Creates the branch from the base branch (the second argument, or the repo's default branch if you leave it out) and switches to it. If the branch already exists on `origin`, it checks that one out instead and ignores the base branch.
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
 5. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
 
