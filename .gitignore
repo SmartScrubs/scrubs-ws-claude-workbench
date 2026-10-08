@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Workspaces created here by running ./ws without WS_ROOT
+/*/
+
+# Local Claude Code settings
+.claude/settings.local.json
