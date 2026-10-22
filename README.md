@@ -15,22 +15,48 @@ What it does:
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
 5. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
 
-## Requirements
+## Setup (new Mac)
 
-- macOS or Linux with `bash` and `git`
-- [Claude Code](https://claude.com/claude-code), installed and signed in (`claude` on your `PATH`)
-- Access to `SmartScrubs/scrubs`: the clone uses HTTPS, so you need a credential helper or `gh auth login`
+`install.sh` sets up everything the workbench needs. It skips anything already installed, so it's safe to re-run.
 
-## Setup
+| What | How it's installed |
+|------|--------------------|
+| Homebrew | official installer, plus `brew shellenv` in `~/.zprofile` |
+| git, AWS CLI, uv | `brew install` |
+| iTerm2, VS Code | `brew install --cask` (plus the `code` command) |
+| Claude Code | official installer (`curl -fsSL https://claude.ai/install.sh \| bash`) |
+| Claude Code plugins: sentry, postman, superpowers | `claude plugin install …@claude-plugins-official` |
+| AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
+| Claude Code extension for VS Code | `code --install-extension anthropic.claude-code` |
+| `ws` command | symlink in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
 
 ```sh
+# git comes with Apple's command line tools; macOS offers to install them
+# the first time you run git.
 git clone https://github.com/SmartScrubs/scrubs-ws-claude-workbench.git ~/tools/scrubs-ws-claude-workbench
 cd ~/tools/scrubs-ws-claude-workbench
-chmod +x ws
 
-# Put it on your PATH (choose one)
-ln -s "$PWD/ws" /usr/local/bin/ws        # system-wide (may need sudo)
-ln -s "$PWD/ws" ~/.local/bin/ws          # per-user, if ~/.local/bin is on PATH
+./install.sh --dry-run   # optional: show what it would do
+./install.sh
+```
+
+Then open a new terminal and sign in:
+
+```sh
+claude          # sign in to Claude Code
+aws login       # or: aws configure sso
+```
+
+Sentry and Postman ask you to sign in the first time Claude uses them (or run `/mcp` in Claude Code).
+
+You also need access to `SmartScrubs/scrubs`. The clone uses HTTPS, so you need a credential helper or `gh auth login`.
+
+### Manual setup
+
+If you already have the tools, you only need `ws` on your `PATH`:
+
+```sh
+ln -s "$PWD/ws" ~/.local/bin/ws
 ```
 
 Optional: choose where workspaces go by adding this to `~/.zshrc`:
