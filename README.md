@@ -24,6 +24,7 @@ If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` r
 | What | How it's installed |
 |------|--------------------|
 | Homebrew | official installer, plus `brew shellenv` in `~/.zprofile` |
+| Oh My Zsh | official installer, run so it never replaces an existing `~/.zshrc`. Set to update itself automatically, without the "update now?" question when a terminal opens |
 | git, GitHub CLI, AWS CLI, uv | `brew install` |
 | Maven | `brew install maven` |
 | Java 11, 21, 25 | `brew install --cask temurin@<version>`, unless a JDK of that version is already installed |

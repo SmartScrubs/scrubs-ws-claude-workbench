@@ -3,7 +3,7 @@
 #
 # Installs (skipping anything already present):
 #   Homebrew, git, GitHub CLI, AWS CLI, uv, Maven, Java 11/21/25 (Temurin),
-#   iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
+#   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `repomancer` command.
@@ -59,6 +59,20 @@ ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 run()  { echo "    + $*"; [[ -n "$DRY_RUN" ]] || "$@"; }
+
+# run_remote <shell> <url> [VAR=value ...] — download an installer script and
+# run it, printing the URL rather than the whole script.
+run_remote() {
+  local shell="$1" url="$2" script status; shift 2
+  echo "    + ${*:+$* }$shell <(curl -fsSL $url)"
+  [[ -n "$DRY_RUN" ]] && return 0
+  script="$(mktemp)"
+  curl -fsSL "$url" -o "$script" || { rm -f "$script"; return 1; }
+  status=0
+  env "$@" "$shell" "$script" || status=$?
+  rm -f "$script"
+  return "$status"
+}
 
 # Questions read from the terminal directly, so they still work when this
 # script itself arrives on stdin (curl ... | bash).
@@ -137,7 +151,7 @@ fi
 if [[ -n "$BREW" ]]; then
   ok "installed ($BREW)"
 else
-  run /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  run_remote /bin/bash https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
   if [[ "$(uname -m)" == "arm64" ]]; then BREW=/opt/homebrew/bin/brew; else BREW=/usr/local/bin/brew; fi
 fi
 add_line "$ZPROFILE" "eval \"\$($BREW shellenv)\""
@@ -206,6 +220,59 @@ link_app_cli() {
 }
 link_app_cli code "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
 link_app_cli subl "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl"
+
+# --- Oh My Zsh -------------------------------------------------------------
+step "Oh My Zsh"
+OMZ_DIR="${ZSH:-$HOME/.oh-my-zsh}"
+if [[ -d "$OMZ_DIR" ]]; then
+  ok "installed ($OMZ_DIR)"
+else
+  # RUNZSH/CHSH: don't switch shells mid-install. KEEP_ZSHRC: never replace an
+  # existing ~/.zshrc (without one, Oh My Zsh writes its own template).
+  run_remote sh https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh \
+    RUNZSH=no CHSH=no KEEP_ZSHRC=yes || warn "Oh My Zsh install failed"
+  [[ -f "$ZSHRC" ]] && grep -q 'oh-my-zsh.sh' "$ZSHRC" && SHELL_CHANGED=1
+fi
+
+# An existing ~/.zshrc that Oh My Zsh kept doesn't load it yet; put the loader
+# at the top so your own settings further down still win.
+if [[ -d "$OMZ_DIR" || -n "$DRY_RUN" ]] && ! grep -qs 'oh-my-zsh.sh' "$ZSHRC"; then
+  echo "    + add Oh My Zsh loader to the top of $ZSHRC"
+  SHELL_CHANGED=1
+  if [[ -z "$DRY_RUN" ]]; then
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+# >>> oh-my-zsh >>>
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="robbyrussell"
+zstyle ':omz:update' mode auto
+plugins=(git)
+source $ZSH/oh-my-zsh.sh
+# <<< oh-my-zsh <<<
+
+EOF
+    [[ -f "$ZSHRC" ]] && cat "$ZSHRC" >> "$tmp"
+    cat "$tmp" > "$ZSHRC" && rm -f "$tmp"
+  fi
+fi
+
+# Update automatically instead of asking at terminal start. An update mode
+# you've set yourself (an uncommented zstyle line) is left alone.
+OMZ_AUTO="zstyle ':omz:update' mode auto"
+if grep -qsE "^[[:space:]]*zstyle ':omz:update' mode" "$ZSHRC"; then
+  ok "update mode: $(grep -E "^[[:space:]]*zstyle ':omz:update' mode" "$ZSHRC" | head -1 | awk '{print $4}')"
+elif [[ -f "$ZSHRC" ]] && grep -qsE "^# *$OMZ_AUTO" "$ZSHRC"; then
+  echo "    + enable automatic updates in $ZSHRC"
+  SHELL_CHANGED=1
+  [[ -n "$DRY_RUN" ]] || sed -i '' -E "s/^# *($OMZ_AUTO)/\1/" "$ZSHRC"
+elif grep -qs 'oh-my-zsh.sh' "$ZSHRC"; then
+  echo "    + enable automatic updates in $ZSHRC"
+  SHELL_CHANGED=1
+  # The zstyle has to come before Oh My Zsh is loaded.
+  [[ -n "$DRY_RUN" ]] || sed -i '' -E "/^[[:space:]]*source .*oh-my-zsh\.sh/i\\
+$OMZ_AUTO
+" "$ZSHRC"
+fi
 
 # --- PATH ------------------------------------------------------------------
 step "PATH"
@@ -307,7 +374,7 @@ step "Claude Code"
 if command -v claude >/dev/null 2>&1; then
   ok "installed ($(claude --version 2>/dev/null | head -1))"
 else
-  run bash -c "curl -fsSL https://claude.ai/install.sh | bash"
+  run_remote bash https://claude.ai/install.sh
   command -v claude >/dev/null 2>&1 || [[ -n "$DRY_RUN" ]] || die "Claude Code install failed"
 fi
 
