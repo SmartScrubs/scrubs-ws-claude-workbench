@@ -2,7 +2,8 @@
 # install.sh — set up a Mac for the scrubs Claude Code workbench.
 #
 # Installs (skipping anything already present):
-#   Homebrew, git, GitHub CLI, AWS CLI, uv, iTerm2, VS Code, Claude Code,
+#   Homebrew, git, GitHub CLI, AWS CLI, uv, Maven, Java 11/21/25 (Temurin),
+#   iTerm2, VS Code, Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `ws` command.
@@ -50,6 +51,8 @@ PLUGINS=(
   comfy-cloud@comfy-skills
 )
 VSCODE_EXTENSION="anthropic.claude-code"
+JAVA_VERSIONS=(11 21 25)
+JAVA_DEFAULT="${JAVA_DEFAULT:-25}"
 
 step() { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$*"; }
@@ -80,6 +83,17 @@ ask() {
   if [[ -n "$default" ]]; then prompt="$prompt [$default]"; fi
   read -r -p "    $prompt: " reply </dev/tty || true
   echo "${reply:-$default}"
+}
+
+# Append a block between marker comments to a file unless the marker is there.
+add_block() {
+  local file="$1" marker="$2" body="$3"
+  if [[ -f "$file" ]] && grep -qF ">>> $marker >>>" "$file"; then
+    ok "$file already has the $marker block"
+  else
+    echo "    + add $marker block to $file"
+    [[ -n "$DRY_RUN" ]] || printf '\n# >>> %s >>>\n%s\n# <<< %s <<<\n' "$marker" "$body" "$marker" >> "$file"
+  fi
 }
 
 # Append a line to a shell rc file unless it's already there.
@@ -153,6 +167,16 @@ brew_formula gh gh
 brew_formula awscli aws
 brew_formula uv uvx   # the AWS MCP server runs via uvx
 
+step "Maven and Java"
+brew_formula maven mvn
+for v in "${JAVA_VERSIONS[@]}"; do
+  if home="$(/usr/libexec/java_home -F -v "$v" 2>/dev/null)"; then
+    ok "Java $v already installed ($home)"
+  else
+    run brew install --cask "temurin@$v"
+  fi
+done
+
 step "iTerm2 and VS Code"
 brew_cask iterm2 "iTerm.app"
 brew_cask visual-studio-code "Visual Studio Code.app"
@@ -174,6 +198,10 @@ else
   add_line "$ZSHRC" 'export PATH="$HOME/.local/bin:$PATH"'
 fi
 export PATH="$LOCAL_BIN:$PATH"
+
+# JAVA_HOME picks the default JDK; `jdk 11` switches the current shell.
+add_block "$ZSHRC" "scrubs workbench java" "export JAVA_HOME=\"\$(/usr/libexec/java_home -v $JAVA_DEFAULT 2>/dev/null)\"
+jdk() { export JAVA_HOME=\"\$(/usr/libexec/java_home -v \"\$1\")\" && java -version; }"
 
 # --- git identity ----------------------------------------------------------
 step "git name and email"

@@ -25,6 +25,8 @@ If `./my-feature` already exists, `ws my-feature` reopens it instead. It resumes
 |------|--------------------|
 | Homebrew | official installer, plus `brew shellenv` in `~/.zprofile` |
 | git, GitHub CLI, AWS CLI, uv | `brew install` |
+| Maven | `brew install maven` |
+| Java 11, 21, 25 | `brew install --cask temurin@<version>`, unless a JDK of that version is already installed |
 | iTerm2, VS Code | `brew install --cask` (plus the `code` command) |
 | Claude Code | official installer (`curl -fsSL https://claude.ai/install.sh \| bash`) |
 | Claude Code plugins: sentry, postman, superpowers, comfy-cloud | `claude plugin install` (from `claude-plugins-official` and `comfy-skills`) |
@@ -66,6 +68,18 @@ Options:
 - `WORKBENCH_DIR` sets where the workbench repo is cloned when the script runs from a URL instead of a checkout. The default is `~/tools/scrubs-ws-claude-workbench`.
 
 At the end it checks every MCP server Claude Code can see (`claude mcp list`) and lists any that need signing in or failed to connect. Sign in to the ones you need from Claude Code with `/mcp`, then open a new terminal.
+
+### Java versions
+
+The installer adds this to `~/.zshrc`:
+
+- `JAVA_HOME` defaults to Java 25. Set `JAVA_DEFAULT=21 ./install.sh` before the first install to choose a different default.
+- `jdk 11`, `jdk 21` or `jdk 25` switches the current terminal to that version. `java` and `mvn` both follow it.
+
+```sh
+jdk 11
+mvn clean install
+```
 
 ### Manual setup
 
