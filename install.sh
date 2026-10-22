@@ -316,17 +316,28 @@ elif confirm "Sign in to GitHub now? (opens your browser)"; then
 else
   warn "not signed in to GitHub; run: gh auth login"
 fi
-# Let git use gh for HTTPS credentials, so cloning private repos just works.
-if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
-  run gh auth setup-git --hostname github.com
-fi
+can_clone_scrubs() { GIT_TERMINAL_PROMPT=0 git ls-remote "$SCRUBS_REPO" HEAD >/dev/null 2>&1; }
 
-if [[ -z "$DRY_RUN" ]]; then
-  if GIT_TERMINAL_PROMPT=0 git ls-remote "$SCRUBS_REPO" HEAD >/dev/null 2>&1; then
-    ok "you have access to SmartScrubs/scrubs"
+# If git can already clone scrubs, leave its credentials alone. Otherwise let
+# git use gh for HTTPS credentials, unless GITHUB_TOKEN/GH_TOKEN is set: gh
+# would hand that token to git instead of your login, and such tokens often
+# can't read repos.
+if [[ -n "$DRY_RUN" ]]; then
+  echo "    + (if git can't clone SmartScrubs/scrubs yet) gh auth setup-git --hostname github.com"
+elif can_clone_scrubs; then
+  ok "git can access SmartScrubs/scrubs"
+elif [[ -n "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
+  warn "git can't access SmartScrubs/scrubs. GITHUB_TOKEN/GH_TOKEN is set in your environment;"
+  warn "remove it (or give it 'repo' scope), then re-run this installer"
+elif command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
+  run gh auth setup-git --hostname github.com
+  if can_clone_scrubs; then
+    ok "git can access SmartScrubs/scrubs"
   else
-    warn "can't reach SmartScrubs/scrubs; check your GitHub sign-in and that you're in the SmartScrubs org"
+    warn "can't reach SmartScrubs/scrubs; check that your GitHub account is in the SmartScrubs org"
   fi
+else
+  warn "can't reach SmartScrubs/scrubs; sign in with 'gh auth login' and re-run this installer"
 fi
 
 # --- AWS -------------------------------------------------------------------

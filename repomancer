@@ -64,10 +64,12 @@ if [[ -n "$BASE" ]]; then
     || die "base branch '$BASE' not found on $REPO"
 fi
 echo "→ Cloning $REPO into $DIR"
-if [[ -n "$BASE" ]]; then
-  git clone --branch "$BASE" "$REPO" "$DIR"
-else
-  git clone "$REPO" "$DIR"
+if ! git clone ${BASE:+--branch "$BASE"} "$REPO" "$DIR"; then
+  if [[ -n "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
+    echo "repomancer: GITHUB_TOKEN/GH_TOKEN is set; if git uses gh for credentials, gh sends that" >&2
+    echo "            token instead of your login. Remove it or give it 'repo' scope." >&2
+  fi
+  exit 1
 fi
 cd "$DIR"
 
