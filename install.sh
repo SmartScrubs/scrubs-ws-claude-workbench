@@ -359,6 +359,34 @@ else
 fi
 
 # --- ws --------------------------------------------------------------------
+step "ws config and workspace folder"
+WS_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ws/config"
+if [[ -f "$WS_CONFIG" ]]; then
+  ok "config exists: $WS_CONFIG"
+else
+  echo "    + create $WS_CONFIG"
+  if [[ -z "$DRY_RUN" ]]; then
+    mkdir -p "$(dirname "$WS_CONFIG")"
+    cat > "$WS_CONFIG" <<'EOF'
+# ws configuration (shell syntax). Uncomment a line to override the default.
+# The WS_ROOT / WS_REPO environment variables override this file.
+
+# Folder where ws creates workspaces (default: ~/Documents/AIProjects)
+#WS_ROOT="$HOME/Documents/AIProjects"
+
+# Repo ws clones (default: https://github.com/SmartScrubs/scrubs.git)
+#WS_REPO="https://github.com/SmartScrubs/scrubs.git"
+EOF
+  fi
+fi
+# Same lookup as ws: environment, then config file, then the default.
+ws_root="$( (WS_ROOT_ENV="${WS_ROOT:-}"; [[ -f "$WS_CONFIG" ]] && source "$WS_CONFIG" >/dev/null 2>&1; r="${WS_ROOT_ENV:-${WS_ROOT:-$HOME/Documents/AIProjects}}"; echo "${r/#\~/$HOME}") )"
+if [[ -d "$ws_root" ]]; then
+  ok "workspace folder exists: $ws_root"
+else
+  run mkdir -p "$ws_root"
+fi
+
 step "ws command"
 if [[ "$(readlink "$LOCAL_BIN/ws" 2>/dev/null)" == "$SCRIPT_DIR/ws" ]]; then
   ok "$LOCAL_BIN/ws already links to $SCRIPT_DIR/ws"

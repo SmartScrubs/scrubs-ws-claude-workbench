@@ -8,16 +8,27 @@
 # If the workspace folder already exists, ws reopens it instead: it resumes the
 # most recent Claude session there, or starts a new one if there isn't one.
 #
-# Env:
-#   WS_ROOT   parent directory for new workspaces (default: current directory)
-#   WS_REPO   repo to clone (default: https://github.com/SmartScrubs/scrubs.git)
+# Settings, from highest to lowest priority:
+#   1. environment variables WS_ROOT / WS_REPO
+#   2. the config file ~/.config/ws/config (shell syntax, e.g. WS_ROOT="$HOME/code")
+#   3. defaults: WS_ROOT=~/Documents/AIProjects, WS_REPO=https://github.com/SmartScrubs/scrubs.git
+#
+#   WS_ROOT   parent directory for workspaces
+#   WS_REPO   repo to clone
 
 set -euo pipefail
 
-REPO="${WS_REPO:-https://github.com/SmartScrubs/scrubs.git}"
-ROOT="${WS_ROOT:-$PWD}"
-
 die() { echo "ws: $*" >&2; exit 1; }
+
+ENV_ROOT="${WS_ROOT:-}" ENV_REPO="${WS_REPO:-}"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ws/config"
+if [[ -f "$CONFIG" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG" || die "could not read $CONFIG"
+fi
+ROOT="${ENV_ROOT:-${WS_ROOT:-$HOME/Documents/AIProjects}}"
+REPO="${ENV_REPO:-${WS_REPO:-https://github.com/SmartScrubs/scrubs.git}}"
+ROOT="${ROOT/#\~/$HOME}"   # allow WS_ROOT=~/... in the config file
 
 [[ $# -ge 1 && $# -le 2 ]] || die "usage: ws <branch-name> [base-branch]"
 BRANCH="$1"
@@ -44,6 +55,8 @@ if [[ -e "$DIR" ]]; then
   echo "→ No previous session found, opening Claude Code (session: ws+$BRANCH)"
   exec claude --name "ws+$BRANCH"
 fi
+
+mkdir -p "$ROOT"
 
 if [[ -n "$BASE" ]]; then
   git check-ref-format --branch "$BASE" >/dev/null 2>&1 || die "invalid base branch name: $BASE"

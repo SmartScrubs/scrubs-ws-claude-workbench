@@ -10,12 +10,12 @@ ws my-feature main       # branch from `main` instead
 What it does:
 
 1. Checks that the branch names are valid, that the base branch exists on GitHub, and that `claude` is on your `PATH`.
-2. Clones the repo into `./my-feature` (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`).
+2. Clones the repo into `~/Documents/AIProjects/my-feature`, wherever you run `ws` from (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). See [Configuration](#configuration) to use a different folder.
 3. Creates the branch from the base branch (the second argument, or the repo's default branch if you leave it out) and switches to it. If the branch already exists on `origin`, it checks that one out instead and ignores the base branch.
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
 5. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
 
-If `./my-feature` already exists, `ws my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch argument is ignored in that case.
+If `~/Documents/AIProjects/my-feature` already exists, `ws my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch argument is ignored in that case.
 
 ## Setup (new Mac)
 
@@ -89,23 +89,29 @@ If you already have the tools, you only need `ws` on your `PATH`:
 ln -s "$PWD/ws" ~/.local/bin/ws
 ```
 
-Optional: choose where workspaces go by adding this to `~/.zshrc`:
-
-```sh
-export WS_ROOT="$HOME/work"
-```
-
 ## Configuration
 
-| Variable  | Default                                      | Purpose                         |
-|-----------|----------------------------------------------|---------------------------------|
-| `WS_ROOT` | current directory                            | Parent folder for new workspaces |
-| `WS_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone                   |
+| Setting   | Default                                      | Purpose                     |
+|-----------|----------------------------------------------|-----------------------------|
+| `WS_ROOT` | `~/Documents/AIProjects`                     | Folder where workspaces go  |
+| `WS_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
+
+To change them for good, edit `~/.config/ws/config` (the installer creates it with every line commented out):
+
+```sh
+WS_ROOT="$HOME/code/workspaces"
+```
+
+For a single run, set an environment variable instead. It overrides the config file:
+
+```sh
+WS_ROOT=~/scratch ws try-something
+```
 
 ## Cleaning up
 
 Each workspace is an ordinary clone, so you remove one by deleting its folder once its branch is pushed or merged:
 
 ```sh
-rm -rf "$WS_ROOT/my-feature"
+rm -rf ~/Documents/AIProjects/my-feature
 ```
