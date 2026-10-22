@@ -335,12 +335,44 @@ else
   run ln -sf "$SCRIPT_DIR/ws" "$LOCAL_BIN/ws"
 fi
 
+# --- MCP server status -----------------------------------------------------
+step "MCP servers"
+NEEDS_MCP_AUTH=""
+if [[ -n "$DRY_RUN" ]]; then
+  echo "    + claude mcp list"
+elif ! command -v claude >/dev/null 2>&1; then
+  warn "claude not installed; skipping"
+elif ! claude auth status >/dev/null 2>&1; then
+  warn "sign in to Claude Code first (claude auth login), then re-run to check MCP servers"
+else
+  echo "    Checking MCP servers (this can take a few seconds)…"
+  # Lines look like "<name>: <url or command> - <status>".
+  while IFS= read -r line; do
+    [[ "$line" == *": "*" - "* ]] || continue
+    name="${line%%: *}" status="${line##* - }"
+    case "$status" in
+      *Connected*)              ok "$name" ;;
+      *"Needs authentication"*) warn "$name: needs sign-in"; NEEDS_MCP_AUTH=1 ;;
+      *)                        warn "$name: ${status:0:80}"; NEEDS_MCP_AUTH=1 ;;
+    esac
+  done < <(claude mcp list 2>/dev/null || true)
+fi
+
 # --- Done ------------------------------------------------------------------
 step "Done"
+if [[ -n "$NEEDS_MCP_AUTH" ]]; then
+  cat <<'EOF'
+    Some MCP servers need attention. Run `claude`, type /mcp and pick the server:
+      "needs sign-in" → choose Authenticate (signs in through your browser).
+      "failed"        → choose Reconnect; if it still fails, it's often temporary.
+    You only need the ones you'll actually use.
+
+EOF
+fi
 cat <<'EOF'
     Next steps:
       1. Open a new terminal (or run: source ~/.zprofile ~/.zshrc)
-      2. Sign in to Sentry and Postman the first time Claude uses them (run /mcp in Claude Code)
+      2. Sign in to any MCP servers you need (claude → /mcp)
       3. Start a workspace:        ws my-feature
 
     Anything skipped above can be finished later with:

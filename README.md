@@ -65,7 +65,7 @@ Options:
 - `--yes` skips every question, and with it the sign-in steps (useful for re-running just to install updates).
 - `WORKBENCH_DIR` sets where the workbench repo is cloned when the script runs from a URL instead of a checkout. The default is `~/tools/scrubs-ws-claude-workbench`.
 
-Afterwards, open a new terminal. Sentry and Postman ask you to sign in the first time Claude uses them (or run `/mcp` in Claude Code).
+At the end it checks every MCP server Claude Code can see (`claude mcp list`) and lists any that need signing in or failed to connect. Sign in to the ones you need from Claude Code with `/mcp`, then open a new terminal.
 
 ### Manual setup
 
