@@ -5,6 +5,9 @@
 #
 #   base-branch   branch to start from (default: the repo's default branch)
 #
+# If the workspace folder already exists, ws reopens it instead: it resumes the
+# most recent Claude session there, or starts a new one if there isn't one.
+#
 # Env:
 #   WS_ROOT   parent directory for new workspaces (default: current directory)
 #   WS_REPO   repo to clone (default: https://github.com/SmartScrubs/scrubs.git)
@@ -21,17 +24,32 @@ BRANCH="$1"
 BASE="${2:-}"
 
 git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || die "invalid branch name: $BRANCH"
+command -v claude >/dev/null || die "claude CLI not found on PATH"
+
+# Branch names may contain '/', which we don't want as nested directories.
+DIR="$ROOT/${BRANCH//\//-}"
+
+if [[ -e "$DIR" ]]; then
+  [[ -e "$DIR/.git" ]] || die "$DIR exists but is not a git repo"
+  cd "$DIR"
+  echo "→ Reopening existing workspace $DIR (on branch '$(git branch --show-current)')"
+  [[ -n "$BASE" ]] && echo "  (ignoring base branch '$BASE')"
+  # Claude Code keeps each folder's transcripts in ~/.claude/projects/<path with
+  # every non-alphanumeric character replaced by '-'>.
+  PROJECT_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
+  if compgen -G "$PROJECT_DIR/*.jsonl" >/dev/null; then
+    echo "→ Resuming Claude Code session"
+    exec claude --continue
+  fi
+  echo "→ No previous session found, opening Claude Code (session: ws+$BRANCH)"
+  exec claude --name "ws+$BRANCH"
+fi
+
 if [[ -n "$BASE" ]]; then
   git check-ref-format --branch "$BASE" >/dev/null 2>&1 || die "invalid base branch name: $BASE"
   git ls-remote --exit-code --heads "$REPO" "$BASE" >/dev/null 2>&1 \
     || die "base branch '$BASE' not found on $REPO"
 fi
-command -v claude >/dev/null || die "claude CLI not found on PATH"
-
-# Branch names may contain '/', which we don't want as nested directories.
-DIR="$ROOT/${BRANCH//\//-}"
-[[ -e "$DIR" ]] && die "directory already exists: $DIR"
-
 echo "→ Cloning $REPO into $DIR"
 if [[ -n "$BASE" ]]; then
   git clone --branch "$BASE" "$REPO" "$DIR"

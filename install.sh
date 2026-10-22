@@ -3,7 +3,7 @@
 #
 # Installs (skipping anything already present):
 #   Homebrew, git, AWS CLI, uv, iTerm2, VS Code, Claude Code,
-#   Claude Code plugins (sentry, postman, superpowers),
+#   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `ws` command.
 #
@@ -21,9 +21,17 @@ LOCAL_BIN="$HOME/.local/bin"
 ZPROFILE="$HOME/.zprofile"
 ZSHRC="$HOME/.zshrc"
 
-MARKETPLACE="claude-plugins-official"
-MARKETPLACE_REPO="anthropics/claude-plugins-official"
-PLUGINS=(sentry postman superpowers)
+# Marketplaces as name=github-repo, plugins as plugin@marketplace.
+MARKETPLACES=(
+  claude-plugins-official=anthropics/claude-plugins-official
+  comfy-skills=Comfy-Org/comfy-skills
+)
+PLUGINS=(
+  sentry@claude-plugins-official
+  postman@claude-plugins-official
+  superpowers@claude-plugins-official
+  comfy-cloud@comfy-skills
+)
 VSCODE_EXTENSION="anthropic.claude-code"
 
 step() { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
@@ -127,20 +135,24 @@ fi
 # --- Claude Code plugins ---------------------------------------------------
 step "Claude Code plugins"
 if [[ -n "$DRY_RUN" ]] && ! command -v claude >/dev/null 2>&1; then
-  warn "claude not installed yet; would add $MARKETPLACE and install: ${PLUGINS[*]}"
+  warn "claude not installed yet; would add marketplaces and install: ${PLUGINS[*]}"
 else
-  if claude plugin marketplace list 2>/dev/null | grep -q "$MARKETPLACE"; then
-    ok "marketplace $MARKETPLACE already added"
-  else
-    run claude plugin marketplace add "$MARKETPLACE_REPO"
-  fi
+  marketplaces="$(claude plugin marketplace list 2>/dev/null || true)"
+  for entry in "${MARKETPLACES[@]}"; do
+    name="${entry%%=*}" repo="${entry#*=}"
+    if grep -qw "$name" <<<"$marketplaces"; then
+      ok "marketplace $name already added"
+    else
+      run claude plugin marketplace add "$repo" || warn "could not add marketplace $name"
+    fi
+  done
 
   installed="$(claude plugin list 2>/dev/null || true)"
   for plugin in "${PLUGINS[@]}"; do
-    if grep -q "$plugin@$MARKETPLACE" <<<"$installed"; then
+    if grep -qF "$plugin" <<<"$installed"; then
       ok "$plugin already installed"
     else
-      run claude plugin install "$plugin@$MARKETPLACE" --scope user || warn "could not install $plugin"
+      run claude plugin install "$plugin" --scope user || warn "could not install $plugin"
     fi
   done
 fi

@@ -10,10 +10,12 @@ ws my-feature main       # branch from `main` instead
 What it does:
 
 1. Checks that the branch names are valid, that the base branch exists on GitHub, and that `claude` is on your `PATH`.
-2. Clones the repo into `./my-feature` (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). It stops if that folder already exists.
+2. Clones the repo into `./my-feature` (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`).
 3. Creates the branch from the base branch (the second argument, or the repo's default branch if you leave it out) and switches to it. If the branch already exists on `origin`, it checks that one out instead and ignores the base branch.
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
 5. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
+
+If `./my-feature` already exists, `ws my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch argument is ignored in that case.
 
 ## Setup (new Mac)
 
@@ -25,7 +27,7 @@ What it does:
 | git, AWS CLI, uv | `brew install` |
 | iTerm2, VS Code | `brew install --cask` (plus the `code` command) |
 | Claude Code | official installer (`curl -fsSL https://claude.ai/install.sh \| bash`) |
-| Claude Code plugins: sentry, postman, superpowers | `claude plugin install …@claude-plugins-official` |
+| Claude Code plugins: sentry, postman, superpowers, comfy-cloud | `claude plugin install` (from `claude-plugins-official` and `comfy-skills`) |
 | AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
 | Claude Code extension for VS Code | `code --install-extension anthropic.claude-code` |
 | `ws` command | symlink in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
