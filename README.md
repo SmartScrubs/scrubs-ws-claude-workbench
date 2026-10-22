@@ -19,18 +19,27 @@ If `./my-feature` already exists, `ws my-feature` reopens it instead. It resumes
 
 ## Setup (new Mac)
 
-`install.sh` sets up everything the workbench needs. It skips anything already installed, so it's safe to re-run.
+`install.sh` sets up everything the workbench needs, then walks you through signing in. It skips anything already installed or signed in, so it's safe to re-run.
 
 | What | How it's installed |
 |------|--------------------|
 | Homebrew | official installer, plus `brew shellenv` in `~/.zprofile` |
-| git, AWS CLI, uv | `brew install` |
+| git, GitHub CLI, AWS CLI, uv | `brew install` |
 | iTerm2, VS Code | `brew install --cask` (plus the `code` command) |
 | Claude Code | official installer (`curl -fsSL https://claude.ai/install.sh \| bash`) |
 | Claude Code plugins: sentry, postman, superpowers, comfy-cloud | `claude plugin install` (from `claude-plugins-official` and `comfy-skills`) |
 | AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
 | Claude Code extension for VS Code | `code --install-extension anthropic.claude-code` |
 | `ws` command | symlink in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
+
+It asks before each sign-in step:
+
+| Step | What happens |
+|------|--------------|
+| git name and email | Asks for them if they aren't set yet, and offers to change them if they are |
+| GitHub | `gh auth login` in your browser, then `gh auth setup-git` so git can clone private SmartScrubs repos over HTTPS. Then it checks you can reach `SmartScrubs/scrubs` |
+| AWS | Choose `aws login` (browser sign-in with your console login), `aws configure sso`, `aws configure` (access keys), or skip |
+| Claude Code | `claude auth login` in your browser |
 
 ```sh
 # git comes with Apple's command line tools; macOS offers to install them
@@ -42,16 +51,13 @@ cd ~/tools/scrubs-ws-claude-workbench
 ./install.sh
 ```
 
-Then open a new terminal and sign in:
+Options:
 
-```sh
-claude          # sign in to Claude Code
-aws login       # or: aws configure sso
-```
+- `--dry-run` prints what it would do without changing anything.
+- `--yes` skips every question, and with it the sign-in steps (useful for re-running just to install updates).
+- `WORKBENCH_DIR` sets where the workbench repo is cloned when the script runs from a URL instead of a checkout. The default is `~/tools/scrubs-ws-claude-workbench`.
 
-Sentry and Postman ask you to sign in the first time Claude uses them (or run `/mcp` in Claude Code).
-
-You also need access to `SmartScrubs/scrubs`. The clone uses HTTPS, so you need a credential helper or `gh auth login`.
+Afterwards, open a new terminal. Sentry and Postman ask you to sign in the first time Claude uses them (or run `/mcp` in Claude Code).
 
 ### Manual setup
 

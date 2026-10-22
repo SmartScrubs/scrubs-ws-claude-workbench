@@ -2,21 +2,38 @@
 # install.sh — set up a Mac for the scrubs Claude Code workbench.
 #
 # Installs (skipping anything already present):
-#   Homebrew, git, AWS CLI, uv, iTerm2, VS Code, Claude Code,
+#   Homebrew, git, GitHub CLI, AWS CLI, uv, iTerm2, VS Code, Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `ws` command.
 #
-# Usage: ./install.sh [--dry-run]
+# Then walks you through credentials: git name/email, GitHub sign-in,
+# AWS sign-in and Claude Code sign-in.
 #
-# Safe to re-run. --dry-run prints what would be done without changing anything.
+# Usage: ./install.sh [--dry-run] [--yes]
+#   --dry-run   print what would be done without changing anything
+#   --yes       don't ask questions; skip the credential setup
+#
+# Can also run straight from GitHub, in which case it clones the workbench
+# repo into $WORKBENCH_DIR (default: ~/tools/scrubs-ws-claude-workbench).
+#
+# Safe to re-run.
 
 set -euo pipefail
 
 DRY_RUN=""
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+ASSUME_YES=""
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    --yes|-y)  ASSUME_YES=1 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKBENCH_REPO="https://github.com/SmartScrubs/scrubs-ws-claude-workbench.git"
+WORKBENCH_DIR="${WORKBENCH_DIR:-$HOME/tools/scrubs-ws-claude-workbench}"
+SCRUBS_REPO="https://github.com/SmartScrubs/scrubs.git"
 LOCAL_BIN="$HOME/.local/bin"
 ZPROFILE="$HOME/.zprofile"
 ZSHRC="$HOME/.zshrc"
@@ -40,6 +57,31 @@ warn() { printf '    \033[33m!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 run()  { echo "    + $*"; [[ -n "$DRY_RUN" ]] || "$@"; }
 
+# Questions read from the terminal directly, so they still work when this
+# script itself arrives on stdin (curl ... | bash).
+INTERACTIVE=""
+if [[ -z "$ASSUME_YES" && -z "$DRY_RUN" ]] && { : </dev/tty; } 2>/dev/null; then
+  INTERACTIVE=1
+fi
+
+# confirm "Question?" [Y|N] — default answer when you just press Enter.
+confirm() {
+  local default="${2:-Y}" hint reply
+  [[ -n "$INTERACTIVE" ]] || return 1
+  [[ "$default" == "Y" ]] && hint="[Y/n]" || hint="[y/N]"
+  read -r -p "    $1 $hint " reply </dev/tty || return 1
+  reply="${reply:-$default}"
+  [[ "$reply" =~ ^[Yy] ]]
+}
+
+# ask "Prompt" [default] — prints the answer.
+ask() {
+  local prompt="$1" default="${2:-}" reply
+  if [[ -n "$default" ]]; then prompt="$prompt [$default]"; fi
+  read -r -p "    $prompt: " reply </dev/tty || true
+  echo "${reply:-$default}"
+}
+
 # Append a line to a shell rc file unless it's already there.
 add_line() {
   local file="$1" line="$2"
@@ -53,6 +95,15 @@ add_line() {
 
 [[ "$(uname -s)" == "Darwin" ]] || die "this script is for macOS"
 [[ -n "$DRY_RUN" ]] && echo "Dry run: nothing will be changed."
+[[ -n "$ASSUME_YES" ]] && echo "Running with --yes: skipping credential setup."
+
+# When run from a checkout, use it; when piped from curl, BASH_SOURCE is empty
+# or points at bash itself, so we clone the repo later instead.
+SCRIPT_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  [[ -f "$dir/ws" ]] && SCRIPT_DIR="$dir"
+fi
 
 # --- Homebrew --------------------------------------------------------------
 step "Homebrew"
@@ -96,8 +147,9 @@ brew_cask() {
 }
 
 # --- CLI tools and apps ----------------------------------------------------
-step "git, AWS CLI and uv"
+step "git, GitHub CLI, AWS CLI and uv"
 brew_formula git git
+brew_formula gh gh
 brew_formula awscli aws
 brew_formula uv uvx   # the AWS MCP server runs via uvx
 
@@ -123,6 +175,88 @@ else
 fi
 export PATH="$LOCAL_BIN:$PATH"
 
+# --- git identity ----------------------------------------------------------
+step "git name and email"
+git_name="$(git config --global user.name 2>/dev/null || true)"
+git_email="$(git config --global user.email 2>/dev/null || true)"
+if [[ -n "$git_name" && -n "$git_email" ]] && ! confirm "Commits are signed as \"$git_name <$git_email>\". Change it?" N; then
+  ok "using $git_name <$git_email>"
+elif [[ -n "$INTERACTIVE" ]]; then
+  git_name="$(ask "Your full name" "$git_name")"
+  git_email="$(ask "Your work email" "$git_email")"
+  [[ -n "$git_name" ]] && run git config --global user.name "$git_name"
+  [[ -n "$git_email" ]] && run git config --global user.email "$git_email"
+else
+  warn "git name/email not set; run: git config --global user.name \"…\" && git config --global user.email \"…\""
+fi
+
+# --- GitHub ----------------------------------------------------------------
+step "GitHub sign-in"
+if [[ -n "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
+  warn "GITHUB_TOKEN/GH_TOKEN is set in your environment and overrides 'gh auth login'"
+fi
+if ! command -v gh >/dev/null 2>&1; then
+  [[ -n "$DRY_RUN" ]] && echo "    + gh auth login --hostname github.com --git-protocol https --web"
+elif gh auth status --hostname github.com >/dev/null 2>&1; then
+  ok "signed in to GitHub as $(gh api user --jq .login 2>/dev/null || echo '?')"
+elif confirm "Sign in to GitHub now? (opens your browser)"; then
+  run gh auth login --hostname github.com --git-protocol https --web || warn "GitHub sign-in failed; run: gh auth login"
+else
+  warn "not signed in to GitHub; run: gh auth login"
+fi
+# Let git use gh for HTTPS credentials, so cloning private repos just works.
+if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
+  run gh auth setup-git --hostname github.com
+fi
+
+if [[ -z "$DRY_RUN" ]]; then
+  if GIT_TERMINAL_PROMPT=0 git ls-remote "$SCRUBS_REPO" HEAD >/dev/null 2>&1; then
+    ok "you have access to SmartScrubs/scrubs"
+  else
+    warn "can't reach SmartScrubs/scrubs; check your GitHub sign-in and that you're in the SmartScrubs org"
+  fi
+fi
+
+# --- AWS -------------------------------------------------------------------
+step "AWS sign-in"
+if ! command -v aws >/dev/null 2>&1; then
+  [[ -n "$DRY_RUN" ]] && echo "    + (would ask how to sign in to AWS)"
+elif identity="$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)"; then
+  ok "signed in to AWS as $identity"
+elif [[ -n "$INTERACTIVE" ]]; then
+  echo "    How do you want to sign in to AWS?"
+  echo "      1) Browser sign-in with your AWS console login (aws login)  [recommended]"
+  echo "      2) AWS IAM Identity Center / SSO (aws configure sso)"
+  echo "      3) Access key and secret (aws configure)"
+  echo "      4) Skip for now"
+  case "$(ask "Choose 1-4" 1)" in
+    1) run aws login || warn "aws login failed; run it again later" ;;
+    2) run aws configure sso || warn "aws configure sso failed; run it again later" ;;
+    3) run aws configure || warn "aws configure failed; run it again later" ;;
+    *) warn "skipped; run 'aws login' later" ;;
+  esac
+  identity="$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)" \
+    && ok "signed in to AWS as $identity" \
+    || warn "AWS credentials still not working. If you used SSO, set AWS_PROFILE to the profile you created"
+else
+  warn "not signed in to AWS; run: aws login"
+fi
+
+# --- Workbench repo --------------------------------------------------------
+step "Workbench repo"
+if [[ -n "$SCRIPT_DIR" ]]; then
+  ok "using this checkout: $SCRIPT_DIR"
+elif [[ -d "$WORKBENCH_DIR/.git" ]]; then
+  ok "already cloned at $WORKBENCH_DIR"
+  run git -C "$WORKBENCH_DIR" pull --ff-only || warn "could not update $WORKBENCH_DIR"
+  SCRIPT_DIR="$WORKBENCH_DIR"
+else
+  run mkdir -p "$(dirname "$WORKBENCH_DIR")"
+  run git clone "$WORKBENCH_REPO" "$WORKBENCH_DIR" \
+    || die "could not clone $WORKBENCH_REPO; sign in with 'gh auth login' and re-run"
+  SCRIPT_DIR="$WORKBENCH_DIR"
+fi
+
 # --- Claude Code -----------------------------------------------------------
 step "Claude Code"
 if command -v claude >/dev/null 2>&1; then
@@ -130,6 +264,16 @@ if command -v claude >/dev/null 2>&1; then
 else
   run bash -c "curl -fsSL https://claude.ai/install.sh | bash"
   command -v claude >/dev/null 2>&1 || [[ -n "$DRY_RUN" ]] || die "Claude Code install failed"
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  [[ -n "$DRY_RUN" ]] && echo "    + claude auth login"
+elif claude auth status >/dev/null 2>&1; then
+  ok "signed in to Claude Code"
+elif confirm "Sign in to Claude Code now? (opens your browser)"; then
+  run claude auth login || warn "Claude sign-in failed; run: claude auth login"
+else
+  warn "not signed in to Claude Code; run: claude auth login"
 fi
 
 # --- Claude Code plugins ---------------------------------------------------
@@ -196,8 +340,11 @@ step "Done"
 cat <<'EOF'
     Next steps:
       1. Open a new terminal (or run: source ~/.zprofile ~/.zshrc)
-      2. Sign in to Claude Code:   claude   (then follow the login prompt)
-      3. Sign in to AWS:           aws login   (or: aws configure sso)
-      4. Sign in to Sentry and Postman the first time Claude uses them (run /mcp in Claude Code)
-      5. Start a workspace:        ws my-feature
+      2. Sign in to Sentry and Postman the first time Claude uses them (run /mcp in Claude Code)
+      3. Start a workspace:        ws my-feature
+
+    Anything skipped above can be finished later with:
+      gh auth login && gh auth setup-git
+      aws login
+      claude auth login
 EOF
