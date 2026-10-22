@@ -41,6 +41,14 @@ It asks before each sign-in step:
 | AWS | Choose `aws login` (browser sign-in with your console login), `aws configure sso`, `aws configure` (access keys), or skip |
 | Claude Code | `claude auth login` in your browser |
 
+Run it straight from GitHub. It signs you in to GitHub, then clones this repo into `~/tools/scrubs-ws-claude-workbench`:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/SmartScrubs/scrubs-ws-claude-workbench/main/install.sh)"
+```
+
+Or from a clone:
+
 ```sh
 # git comes with Apple's command line tools; macOS offers to install them
 # the first time you run git.
