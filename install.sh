@@ -130,6 +130,42 @@ add_line() {
 [[ -n "$DRY_RUN" ]] && echo "Dry run: nothing will be changed."
 [[ -n "$ASSUME_YES" ]] && echo "Running with --yes: skipping credential setup."
 
+# --- Network check ---------------------------------------------------------
+# Fail early and clearly if a download host is blocked, rather than halfway
+# through Homebrew. Any HTTP answer counts; only "can't connect" fails.
+step "Network"
+NEEDED_HOSTS=(github.com raw.githubusercontent.com ghcr.io formulae.brew.sh claude.ai packagecontrol.io)
+unreachable=() intercepted=()
+for host in "${NEEDED_HOSTS[@]}"; do
+  code=0
+  curl -sS -o /dev/null --max-time 15 "https://$host" 2>/dev/null || code=$?
+  case "$code" in
+    0)     ok "$host" ;;
+    35|60) intercepted+=("$host"); warn "$host: certificate not trusted (traffic is being intercepted)" ;;
+    6)     unreachable+=("$host"); warn "$host: name can't be resolved (blocked or no DNS)" ;;
+    *)     unreachable+=("$host"); warn "$host: can't connect (curl error $code)" ;;
+  esac
+done
+if (( ${#intercepted[@]} )); then
+  printf '\n    Something on this network replaces the certificates of: %s\n' "${intercepted[*]}" >&2
+  printf '    That is usually company security software (Cisco Umbrella, Zscaler, ...)\n' >&2
+  printf '    inspecting HTTPS traffic. Command-line tools reject those certificates.\n' >&2
+  printf '    Ask IT to exclude these hosts from SSL inspection, then re-run this installer.\n' >&2
+fi
+if (( ${#unreachable[@]} )); then
+  printf '\n    This Mac can'\''t reach: %s\n' "${unreachable[*]}" >&2
+  printf '    Usually a VPN, a filtering network (company security software such as\n' >&2
+  printf '    Cisco Umbrella or Zscaler, Pi-hole) or an unfinished Wi-Fi login.\n' >&2
+  printf '    Check with:   nslookup %s\n' "${unreachable[0]}" >&2
+  printf '    Ask IT to allow these hosts, or try another network, then re-run this\n' >&2
+  printf '    installer. It picks up where it left off.\n' >&2
+fi
+# Steps that are already done don't need these hosts, so a set-up Mac can go on.
+if (( ${#intercepted[@]} + ${#unreachable[@]} )) && [[ -z "$DRY_RUN" ]]; then
+  echo
+  confirm "Continue anyway? Downloads from those hosts will fail." N || exit 1
+fi
+
 # When run from a checkout, use it; when piped from curl, BASH_SOURCE is empty
 # or points at bash itself, so we clone the repo later instead.
 SCRIPT_DIR=""
@@ -151,7 +187,8 @@ fi
 if [[ -n "$BREW" ]]; then
   ok "installed ($BREW)"
 else
-  run_remote /bin/bash https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+  run_remote /bin/bash https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
+    || die "Homebrew install failed (see its output above). Fix what it reports, then re-run this installer."
   if [[ "$(uname -m)" == "arm64" ]]; then BREW=/opt/homebrew/bin/brew; else BREW=/usr/local/bin/brew; fi
 fi
 add_line "$ZPROFILE" "eval \"\$($BREW shellenv)\""
