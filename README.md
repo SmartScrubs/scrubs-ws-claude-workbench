@@ -1,21 +1,21 @@
-# ws — Claude Code workspace launcher
+# repomancer — Claude Code workspace launcher
 
-`ws` gives you a fresh clone of [SmartScrubs/scrubs](https://github.com/SmartScrubs/scrubs) on a new branch, then opens Claude Code in it.
+`repomancer` gives you a fresh clone of [SmartScrubs/scrubs](https://github.com/SmartScrubs/scrubs) on a new branch, then opens Claude Code in it.
 
 ```sh
-ws my-feature            # branch from the repo's default branch (currently `zenbu`)
-ws my-feature main       # branch from `main` instead
+repomancer my-feature        # branch from the repo's default branch (currently `zenbu`)
+repomancer my-feature main   # branch from `main` instead
 ```
 
 What it does:
 
 1. Checks that the branch names are valid, that the base branch exists on GitHub, and that `claude` is on your `PATH`.
-2. Clones the repo into `~/Documents/AIProjects/my-feature`, wherever you run `ws` from (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). See [Configuration](#configuration) to use a different folder.
+2. Clones the repo into `~/Documents/AIProjects/my-feature`, wherever you run `repomancer` from (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). See [Configuration](#configuration) to use a different folder.
 3. Creates the branch from the base branch (the second argument, or the repo's default branch if you leave it out) and switches to it. If the branch already exists on `origin`, it checks that one out instead and ignores the base branch.
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
 5. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
 
-If `~/Documents/AIProjects/my-feature` already exists, `ws my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch argument is ignored in that case.
+If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch argument is ignored in that case.
 
 ## Setup (new Mac)
 
@@ -32,7 +32,7 @@ If `~/Documents/AIProjects/my-feature` already exists, `ws my-feature` reopens i
 | Claude Code plugins: sentry, postman, superpowers, comfy-cloud | `claude plugin install` (from `claude-plugins-official` and `comfy-skills`) |
 | AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
 | Claude Code extension for VS Code | `code --install-extension anthropic.claude-code` |
-| `ws` command | symlink in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
+| `repomancer` command | symlink in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
 
 It asks before each sign-in step:
 
@@ -83,29 +83,29 @@ mvn clean install
 
 ### Manual setup
 
-If you already have the tools, you only need `ws` on your `PATH`:
+If you already have the tools, you only need `repomancer` on your `PATH`:
 
 ```sh
-ln -s "$PWD/ws" ~/.local/bin/ws
+ln -s "$PWD/repomancer" ~/.local/bin/repomancer
 ```
 
 ## Configuration
 
 | Setting   | Default                                      | Purpose                     |
 |-----------|----------------------------------------------|-----------------------------|
-| `WS_ROOT` | `~/Documents/AIProjects`                     | Folder where workspaces go  |
-| `WS_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
+| `REPOMANCER_ROOT` | `~/Documents/AIProjects`                     | Folder where workspaces go  |
+| `REPOMANCER_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
 
-To change them for good, edit `~/.config/ws/config` (the installer creates it with every line commented out):
+To change them for good, edit `~/.config/repomancer/config` (the installer creates it with every line commented out):
 
 ```sh
-WS_ROOT="$HOME/code/workspaces"
+REPOMANCER_ROOT="$HOME/code/workspaces"
 ```
 
 For a single run, set an environment variable instead. It overrides the config file:
 
 ```sh
-WS_ROOT=~/scratch ws try-something
+REPOMANCER_ROOT=~/scratch repomancer try-something
 ```
 
 ## Cleaning up

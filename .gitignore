@@ -7,7 +7,7 @@
 *.swp
 *~
 
-# Workspaces created here by running ./ws without WS_ROOT
+# Workspaces created here by running ./repomancer without REPOMANCER_ROOT
 /*/
 
 # Local Claude Code settings

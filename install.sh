@@ -6,7 +6,7 @@
 #   iTerm2, VS Code, Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
-#   the Claude Code VS Code extension, and the `ws` command.
+#   the Claude Code VS Code extension, and the `repomancer` command.
 #
 # Then walks you through credentials: git name/email, GitHub sign-in,
 # AWS sign-in and Claude Code sign-in.
@@ -121,7 +121,7 @@ add_line() {
 SCRIPT_DIR=""
 if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
   dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  [[ -f "$dir/ws" ]] && SCRIPT_DIR="$dir"
+  [[ -f "$dir/repomancer" ]] && SCRIPT_DIR="$dir"
 fi
 
 # --- Homebrew --------------------------------------------------------------
@@ -358,42 +358,46 @@ else
   run code --install-extension "$VSCODE_EXTENSION"
 fi
 
-# --- ws --------------------------------------------------------------------
-step "ws config and workspace folder"
-WS_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ws/config"
-if [[ -f "$WS_CONFIG" ]]; then
-  ok "config exists: $WS_CONFIG"
+# --- repomancer ------------------------------------------------------------
+step "repomancer config and workspace folder"
+RM_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/repomancer/config"
+if [[ -f "$RM_CONFIG" ]]; then
+  ok "config exists: $RM_CONFIG"
 else
-  echo "    + create $WS_CONFIG"
+  echo "    + create $RM_CONFIG"
   if [[ -z "$DRY_RUN" ]]; then
-    mkdir -p "$(dirname "$WS_CONFIG")"
-    cat > "$WS_CONFIG" <<'EOF'
-# ws configuration (shell syntax). Uncomment a line to override the default.
-# The WS_ROOT / WS_REPO environment variables override this file.
+    mkdir -p "$(dirname "$RM_CONFIG")"
+    cat > "$RM_CONFIG" <<'EOF'
+# repomancer configuration (shell syntax). Uncomment a line to override the default.
+# The REPOMANCER_ROOT / REPOMANCER_REPO environment variables override this file.
 
-# Folder where ws creates workspaces (default: ~/Documents/AIProjects)
-#WS_ROOT="$HOME/Documents/AIProjects"
+# Folder where repomancer creates workspaces (default: ~/Documents/AIProjects)
+#REPOMANCER_ROOT="$HOME/Documents/AIProjects"
 
-# Repo ws clones (default: https://github.com/SmartScrubs/scrubs.git)
-#WS_REPO="https://github.com/SmartScrubs/scrubs.git"
+# Repo repomancer clones (default: https://github.com/SmartScrubs/scrubs.git)
+#REPOMANCER_REPO="https://github.com/SmartScrubs/scrubs.git"
 EOF
   fi
 fi
-# Same lookup as ws: environment, then config file, then the default.
-ws_root="$( (WS_ROOT_ENV="${WS_ROOT:-}"; [[ -f "$WS_CONFIG" ]] && source "$WS_CONFIG" >/dev/null 2>&1; r="${WS_ROOT_ENV:-${WS_ROOT:-$HOME/Documents/AIProjects}}"; echo "${r/#\~/$HOME}") )"
-if [[ -d "$ws_root" ]]; then
-  ok "workspace folder exists: $ws_root"
+# Same lookup as repomancer: environment, then config file, then the default.
+rm_root="$( (ROOT_ENV="${REPOMANCER_ROOT:-}"; [[ -f "$RM_CONFIG" ]] && source "$RM_CONFIG" >/dev/null 2>&1; r="${ROOT_ENV:-${REPOMANCER_ROOT:-$HOME/Documents/AIProjects}}"; echo "${r/#\~/$HOME}") )"
+if [[ -d "$rm_root" ]]; then
+  ok "workspace folder exists: $rm_root"
 else
-  run mkdir -p "$ws_root"
+  run mkdir -p "$rm_root"
 fi
 
-step "ws command"
-if [[ "$(readlink "$LOCAL_BIN/ws" 2>/dev/null)" == "$SCRIPT_DIR/ws" ]]; then
-  ok "$LOCAL_BIN/ws already links to $SCRIPT_DIR/ws"
+step "repomancer command"
+if [[ "$(readlink "$LOCAL_BIN/repomancer" 2>/dev/null)" == "$SCRIPT_DIR/repomancer" ]]; then
+  ok "$LOCAL_BIN/repomancer already links to $SCRIPT_DIR/repomancer"
 else
   run mkdir -p "$LOCAL_BIN"
-  run chmod +x "$SCRIPT_DIR/ws"
-  run ln -sf "$SCRIPT_DIR/ws" "$LOCAL_BIN/ws"
+  run chmod +x "$SCRIPT_DIR/repomancer"
+  run ln -sf "$SCRIPT_DIR/repomancer" "$LOCAL_BIN/repomancer"
+fi
+# repomancer used to be called ws; remove the old link once it no longer works.
+if [[ -L "$LOCAL_BIN/ws" && ! -e "$LOCAL_BIN/ws" && "$(readlink "$LOCAL_BIN/ws")" == */ws ]]; then
+  run rm "$LOCAL_BIN/ws"
 fi
 
 # --- MCP server status -----------------------------------------------------
@@ -433,7 +437,7 @@ fi
 cat <<'EOF'
     Next steps:
       1. Sign in to any MCP servers you need (claude → /mcp)
-      2. Start a workspace:        ws my-feature
+      2. Start a workspace:        repomancer my-feature
 
     Anything skipped above can be finished later with:
       gh auth login && gh auth setup-git

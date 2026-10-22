@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
-# ws — spin up a fresh clone of the scrubs repo on a new branch and open Claude Code in it.
+# repomancer — spin up a fresh clone of the scrubs repo on a new branch and open Claude Code in it.
 #
-# Usage: ws <branch-name> [base-branch]
+# Usage: repomancer <branch-name> [base-branch]
 #
 #   base-branch   branch to start from (default: the repo's default branch)
 #
-# If the workspace folder already exists, ws reopens it instead: it resumes the
+# If the workspace folder already exists, repomancer reopens it instead: it resumes the
 # most recent Claude session there, or starts a new one if there isn't one.
 #
 # Settings, from highest to lowest priority:
-#   1. environment variables WS_ROOT / WS_REPO
-#   2. the config file ~/.config/ws/config (shell syntax, e.g. WS_ROOT="$HOME/code")
-#   3. defaults: WS_ROOT=~/Documents/AIProjects, WS_REPO=https://github.com/SmartScrubs/scrubs.git
+#   1. environment variables REPOMANCER_ROOT / REPOMANCER_REPO
+#   2. the config file ~/.config/repomancer/config (shell syntax, e.g. REPOMANCER_ROOT="$HOME/code")
+#   3. defaults: REPOMANCER_ROOT=~/Documents/AIProjects, REPOMANCER_REPO=https://github.com/SmartScrubs/scrubs.git
 #
-#   WS_ROOT   parent directory for workspaces
-#   WS_REPO   repo to clone
+#   REPOMANCER_ROOT   parent directory for workspaces
+#   REPOMANCER_REPO   repo to clone
 
 set -euo pipefail
 
-die() { echo "ws: $*" >&2; exit 1; }
+die() { echo "repomancer: $*" >&2; exit 1; }
 
-ENV_ROOT="${WS_ROOT:-}" ENV_REPO="${WS_REPO:-}"
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ws/config"
+ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/repomancer/config"
 if [[ -f "$CONFIG" ]]; then
   # shellcheck source=/dev/null
   source "$CONFIG" || die "could not read $CONFIG"
 fi
-ROOT="${ENV_ROOT:-${WS_ROOT:-$HOME/Documents/AIProjects}}"
-REPO="${ENV_REPO:-${WS_REPO:-https://github.com/SmartScrubs/scrubs.git}}"
-ROOT="${ROOT/#\~/$HOME}"   # allow WS_ROOT=~/... in the config file
+ROOT="${ENV_ROOT:-${REPOMANCER_ROOT:-$HOME/Documents/AIProjects}}"
+REPO="${ENV_REPO:-${REPOMANCER_REPO:-https://github.com/SmartScrubs/scrubs.git}}"
+ROOT="${ROOT/#\~/$HOME}"   # allow REPOMANCER_ROOT=~/... in the config file
 
-[[ $# -ge 1 && $# -le 2 ]] || die "usage: ws <branch-name> [base-branch]"
+[[ $# -ge 1 && $# -le 2 ]] || die "usage: repomancer <branch-name> [base-branch]"
 BRANCH="$1"
 BASE="${2:-}"
 
