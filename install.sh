@@ -85,6 +85,9 @@ ask() {
   echo "${reply:-$default}"
 }
 
+# Set when we edit ~/.zprofile or ~/.zshrc, so we know the current shell is stale.
+SHELL_CHANGED=""
+
 # Append a block between marker comments to a file unless the marker is there.
 add_block() {
   local file="$1" marker="$2" body="$3"
@@ -92,6 +95,7 @@ add_block() {
     ok "$file already has the $marker block"
   else
     echo "    + add $marker block to $file"
+    SHELL_CHANGED=1
     [[ -n "$DRY_RUN" ]] || printf '\n# >>> %s >>>\n%s\n# <<< %s <<<\n' "$marker" "$body" "$marker" >> "$file"
   fi
 }
@@ -103,6 +107,7 @@ add_line() {
     ok "$file already has: $line"
   else
     echo "    + echo '$line' >> $file"
+    SHELL_CHANGED=1
     [[ -n "$DRY_RUN" ]] || printf '\n%s\n' "$line" >> "$file"
   fi
 }
@@ -399,12 +404,28 @@ EOF
 fi
 cat <<'EOF'
     Next steps:
-      1. Open a new terminal (or run: source ~/.zprofile ~/.zshrc)
-      2. Sign in to any MCP servers you need (claude → /mcp)
-      3. Start a workspace:        ws my-feature
+      1. Sign in to any MCP servers you need (claude → /mcp)
+      2. Start a workspace:        ws my-feature
 
     Anything skipped above can be finished later with:
       gh auth login && gh auth setup-git
       aws login
       claude auth login
 EOF
+
+# A script can't change the shell that started it, so if we edited the zsh
+# config, hand over to a fresh login shell that has it loaded. Read from the
+# terminal so this also works when the script arrived on stdin (curl | bash).
+if [[ -n "$SHELL_CHANGED" ]]; then
+  if [[ -n "$INTERACTIVE" && "${SHELL:-}" == */zsh ]]; then
+    echo
+    echo "    Your shell config changed; starting a fresh shell with it loaded…"
+    exec "$SHELL" -l </dev/tty
+  elif [[ -n "$DRY_RUN" ]]; then
+    echo
+    echo "    + exec ${SHELL:-zsh} -l   (shell config would change)"
+  else
+    echo
+    echo "    Your shell config changed: open a new terminal (or run: source ~/.zprofile ~/.zshrc)"
+  fi
+fi
