@@ -27,7 +27,8 @@ If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` r
 | git, GitHub CLI, AWS CLI, uv | `brew install` |
 | Maven | `brew install maven` |
 | Java 11, 21, 25 | `brew install --cask temurin@<version>`, unless a JDK of that version is already installed |
-| iTerm2, VS Code | `brew install --cask` (plus the `code` command) |
+| iTerm2, VS Code, Sublime Text | `brew install --cask`, plus the `code` and `subl` commands (linked into `~/.local/bin` if you installed the app by hand) |
+| Markdown preview for Sublime Text | Package Control plus the [MarkdownPreview](https://packagecontrol.io/packages/MarkdownPreview) package, which Package Control installs the next time Sublime starts |
 | Claude Code | official installer (`curl -fsSL https://claude.ai/install.sh \| bash`) |
 | Claude Code plugins: sentry, postman, superpowers, comfy-cloud | `claude plugin install` (from `claude-plugins-official` and `comfy-skills`) |
 | AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
@@ -68,6 +69,10 @@ Options:
 - `WORKBENCH_DIR` sets where the workbench repo is cloned when the script runs from a URL instead of a checkout. The default is `~/tools/scrubs-ws-claude-workbench`.
 
 At the end it checks every MCP server Claude Code can see (`claude mcp list`) and lists any that need signing in or failed to connect. Sign in to the ones you need from Claude Code with `/mcp`, then open a new terminal.
+
+### Markdown preview in Sublime Text
+
+Open a `.md` file, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> and run **Markdown Preview: Preview in Browser**. If Sublime was open while the installer ran, restart it first so Package Control can install the package.
 
 ### Java versions
 

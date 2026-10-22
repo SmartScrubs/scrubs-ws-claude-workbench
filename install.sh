@@ -3,7 +3,7 @@
 #
 # Installs (skipping anything already present):
 #   Homebrew, git, GitHub CLI, AWS CLI, uv, Maven, Java 11/21/25 (Temurin),
-#   iTerm2, VS Code, Claude Code,
+#   iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `repomancer` command.
@@ -182,18 +182,30 @@ for v in "${JAVA_VERSIONS[@]}"; do
   fi
 done
 
-step "iTerm2 and VS Code"
+step "iTerm2, VS Code and Sublime Text"
 brew_cask iterm2 "iTerm.app"
 brew_cask visual-studio-code "Visual Studio Code.app"
+brew_cask sublime-text "Sublime Text.app"
 
-# Make the `code` command available even if VS Code was installed by hand.
-if ! command -v code >/dev/null 2>&1; then
-  VSCODE_BIN="/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
-  if [[ -x "$VSCODE_BIN" ]]; then
+# The casks put `code` and `subl` on PATH; apps installed by hand don't, so
+# link their command-line tools into ~/.local/bin.
+link_app_cli() {
+  local cmd="$1" bin="$2"
+  if [[ "$(readlink "$LOCAL_BIN/$cmd" 2>/dev/null)" == "$bin" ]]; then
+    ok "$cmd command available ($LOCAL_BIN/$cmd)"
+  elif command -v "$cmd" >/dev/null 2>&1; then
+    ok "$cmd command available ($(command -v "$cmd"))"
+  elif [[ -x "$bin" ]]; then
     run mkdir -p "$LOCAL_BIN"
-    run ln -sf "$VSCODE_BIN" "$LOCAL_BIN/code"
+    run ln -sf "$bin" "$LOCAL_BIN/$cmd"
+  elif [[ -n "$DRY_RUN" ]]; then
+    echo "    + (link $cmd once the app is installed)"
+  else
+    warn "$cmd command not found and $bin is missing"
   fi
-fi
+}
+link_app_cli code "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+link_app_cli subl "/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl"
 
 # --- PATH ------------------------------------------------------------------
 step "PATH"
@@ -342,6 +354,51 @@ else
   # agent-toolkit only sets up agents whose config directory exists.
   run mkdir -p "$HOME/.claude"
   run aws configure agent-toolkit --yes || warn "aws configure agent-toolkit failed; re-run it by hand"
+fi
+
+# --- Sublime Text packages -------------------------------------------------
+step "Sublime Text Markdown preview"
+ST_DIR="$HOME/Library/Application Support/Sublime Text"
+PC_PACKAGE="$ST_DIR/Installed Packages/Package Control.sublime-package"
+PC_SETTINGS="$ST_DIR/Packages/User/Package Control.sublime-settings"
+
+if [[ -f "$PC_PACKAGE" ]]; then
+  ok "Package Control already installed"
+else
+  run mkdir -p "$ST_DIR/Installed Packages"
+  run curl -fsSL -o "$PC_PACKAGE" "https://packagecontrol.io/Package%20Control.sublime-package" \
+    || warn "could not download Package Control"
+fi
+
+# Package Control installs anything listed in installed_packages that's
+# missing the next time Sublime Text starts.
+if grep -qs '"MarkdownPreview"' "$PC_SETTINGS"; then
+  ok "MarkdownPreview already listed"
+else
+  echo "    + add MarkdownPreview to $PC_SETTINGS"
+  if [[ -z "$DRY_RUN" ]]; then
+    mkdir -p "$(dirname "$PC_SETTINGS")"
+    [[ -f "$PC_SETTINGS" ]] && cp "$PC_SETTINGS" "$PC_SETTINGS.bak"
+    # Sublime settings allow comments and trailing commas; strict JSON doesn't.
+    /usr/bin/python3 - "$PC_SETTINGS" <<'PYEOF' || warn "could not update $PC_SETTINGS; install MarkdownPreview with Package Control: Install Package"
+import json, os, re, sys
+path = sys.argv[1]
+text = open(path).read() if os.path.exists(path) else ""
+text = re.sub(r'^\s*//.*$', '', text, flags=re.M)
+text = re.sub(r',(\s*[\]}])', r'\1', text)
+settings = json.loads(text) if text.strip() else {}
+packages = settings.setdefault("installed_packages", [])
+for name in ("Package Control", "MarkdownPreview"):
+    if name not in packages:
+        packages.append(name)
+with open(path, "w") as f:
+    json.dump(settings, f, indent="\t")
+    f.write("\n")
+PYEOF
+    if pgrep -xq sublime_text; then
+      warn "restart Sublime Text so Package Control installs MarkdownPreview"
+    fi
+  fi
 fi
 
 # --- VS Code extension -----------------------------------------------------
