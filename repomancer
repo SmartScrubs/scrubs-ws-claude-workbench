@@ -23,6 +23,9 @@
 #   REPOMANCER_INTENT        intent to use when --intent isn't given (default: default)
 #   REPOMANCER_AGENTS_REPO   repo with the AGENTS.md files (default: https://github.com/SmartScrubs/agents-md.git)
 
+# The whole script is one { … } block: bash reads all of it before running
+# anything, so editing or updating this file while it runs can't break it.
+{
 set -euo pipefail
 
 die()  { echo "repomancer: $*" >&2; exit 1; }
@@ -192,3 +195,6 @@ fi
 
 echo "→ Opening Claude Code (session: ws+$BRANCH)"
 exec claude --name "ws+$BRANCH"
+
+exit
+}

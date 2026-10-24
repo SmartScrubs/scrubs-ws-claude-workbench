@@ -16,6 +16,9 @@
 # Reads the same settings as repomancer: environment variables, then
 # ~/.config/repomancer/config, then the defaults.
 
+# The whole script is one { … } block: bash reads all of it before running
+# anything, so editing or updating this file while it runs can't break it.
+{
 set -euo pipefail
 
 die()  { echo "scry: $*" >&2; exit 1; }
@@ -397,3 +400,6 @@ case "${1:-}" in
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac
+
+exit
+}
