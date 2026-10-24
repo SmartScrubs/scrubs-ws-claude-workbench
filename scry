@@ -206,32 +206,46 @@ session_cmd() {
   esac
 }
 
+where() {  # <tab|vsplit|hsplit> → words for messages
+  case "$1" in vsplit) echo "pane beside this one" ;; hsplit) echo "pane below this one" ;; *) echo "tab" ;; esac
+}
+
 open_workspace() {  # <tab|vsplit|hsplit> <name>
-  local where
-  case "$1" in vsplit) where="pane beside this one" ;; hsplit) where="pane below this one" ;; *) where="tab" ;; esac
   iterm_run "$1" "$(session_cmd "$(repomancer_cmd "$2")")"
-  STATUS="Opened $2 in a new iTerm2 $where."
+  STATUS="Opened $2 in a new iTerm2 $(where "$1")."
   echo "$STATUS"
 }
 
 # --- prompts ---------------------------------------------------------------
-ask() {  # ask "Prompt" [default] → prints the answer
-  local reply
-  if [[ -n "${2:-}" ]]; then read -r -p "$1 [$2]: " reply; else read -r -p "$1: " reply; fi
-  echo "${reply:-${2:-}}"
+# input "Prompt" [default] [hint] → prints the text typed. Fails (status 1)
+# when cancelled: Esc with fzf (a one-line fzf with no list is a text box;
+# Enter exits 1 with the text, Esc/ctrl-c exit 130), or "q" without it.
+input() {
+  local prompt="$1" default="${2:-}" hint="${3:-}" out rc=0 reply
+  if [[ -n "$HAVE_FZF" ]]; then
+    out="$(fzf --print-query --height=4 --reverse --no-info --prompt="$prompt: " --query="$default" \
+               --header="${hint:+$hint · }enter: continue · esc: cancel" </dev/null)" || rc=$?
+    (( rc != 130 )) || return 1
+    head -1 <<<"$out"
+  else
+    read -r -p "$prompt${default:+ [$default]}${hint:+ ($hint)}, q to cancel: " reply || return 1
+    [[ "$reply" != q ]] || return 1
+    echo "${reply:-$default}"
+  fi
 }
 
-# pick "Prompt" option... → prints the chosen option (empty if cancelled)
+# pick "Prompt" option... → prints the chosen option (empty if cancelled with
+# Esc, or with Enter / "q" in the numbered fallback)
 pick() {
   local prompt="$1"; shift
   if [[ -n "$HAVE_FZF" ]]; then
-    printf '%s\n' "$@" | fzf --height=~15 --reverse --prompt="$prompt > " || true
+    printf '%s\n' "$@" | fzf --height=~15 --reverse --prompt="$prompt > " --header="enter: choose · esc: cancel" || true
   else
     local i=1 o n
     for o in "$@"; do echo "  $i) $o" >&2; i=$((i + 1)); done
     while true; do
-      read -r -p "$prompt (number, Enter to cancel): " n || return 0
-      [[ -n "$n" ]] || return 0
+      read -r -p "$prompt (number; Enter or q to cancel): " n || return 0
+      [[ -n "$n" && "$n" != q ]] || return 0
       if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= $# )); then
         eval "echo \"\${$n}\""; return 0
       fi
@@ -244,28 +258,40 @@ intents() {
   repomancer --list-intents 2>/dev/null | sed -n 's/^  //p'
 }
 
+cancelled() { STATUS="Cancelled."; return 0; }
+
 new_workspace() {  # [tab|vsplit|hsplit]
-  local mode="${1:-tab}" branch base intent default_intent options=() i
+  local mode="${1:-tab}" branch base intent default_intent options=() i dir choice
   clear_screen; echo "${BOLD}New workspace${RESET}"
-  branch="$(ask "Branch name")"
-  [[ -n "$branch" ]] || { echo "Cancelled."; return 0; }
-  if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
-    echo "${RED}'$branch' isn't a valid branch name.${RESET}"; return 0
+  [[ -n "$HAVE_FZF" ]] || echo "${DIM}Type q at any prompt to cancel.${RESET}"
+
+  while true; do
+    branch="$(input "Branch name")" || { cancelled; return 0; }
+    [[ -n "$branch" ]] || { cancelled; return 0; }
+    git check-ref-format --branch "$branch" >/dev/null 2>&1 && break
+    echo "${RED}'$branch' isn't a valid branch name; try another.${RESET}"
+  done
+
+  dir="${branch//\//-}"
+  if [[ -e "$ROOT/$dir" ]]; then
+    choice="$(pick "$dir already exists. Reopen it?" "Yes, reopen it" "No, cancel")"
+    if [[ "$choice" == Yes* ]]; then open_workspace "$mode" "$dir"; else cancelled; fi
+    return 0
   fi
-  if [[ -e "$ROOT/${branch//\//-}" ]]; then
-    echo "${YELLOW}$ROOT/${branch//\//-} already exists; it will be reopened.${RESET}"
-    open_workspace "$mode" "${branch//\//-}"; return 0
-  fi
-  base="$(ask "Base branch (Enter for the repo's default)")"
+
+  base="$(input "Base branch" "" "empty: the repo's default branch")" || { cancelled; return 0; }
 
   default_intent="$(lower "${ENV_INTENT:-${CFG_INTENT:-default}}")"
   options=("$default_intent")
   while IFS= read -r i; do [[ "$i" == "$default_intent" ]] || options+=("$i"); done < <(intents)
   intent="$(pick "Intent" "${options[@]}")"
-  [[ -n "$intent" ]] || intent="$default_intent"
+  [[ -n "$intent" ]] || { cancelled; return 0; }
+
+  choice="$(pick "Start $branch${base:+ from $base} with intent '$intent'?" "Yes, start it" "No, cancel")"
+  [[ "$choice" == Yes* ]] || { cancelled; return 0; }
 
   iterm_run "$mode" "$(session_cmd "$(repomancer_cmd "$branch" ${base:+"$base"} --intent "$intent")")"
-  STATUS="Started $branch ($intent) in a new iTerm2 $mode."
+  STATUS="Started $branch ($intent) in a new iTerm2 $(where "$mode")."
   echo "$STATUS"
 }
 
@@ -315,11 +341,10 @@ settings() {
       "Back")"
     case "$choice" in
       "Workspace folder"*)
-        value="$(ask "Workspace folder (empty for the default)" "${CFG_ROOT:-}")"
+        value="$(input "Workspace folder" "${CFG_ROOT:-}" "empty: the default")" || continue
         value="${value/#\~/$HOME}"
         if [[ -n "$value" && ! -d "$value" ]]; then
-          read -r -p "$value doesn't exist. Create it? [Y/n] " yn
-          [[ "$yn" =~ ^[Nn] ]] && continue
+          [[ "$(pick "$value doesn't exist. Create it?" "Yes, create it" "No, cancel")" == Yes* ]] || continue
           mkdir -p "$value"
         fi
         set_config REPOMANCER_ROOT "$value" ;;
@@ -331,7 +356,7 @@ settings() {
       "Repo to clone"*|"Agents repo"*)
         local key=REPOMANCER_REPO current="$CFG_REPO"
         [[ "$choice" == "Agents repo"* ]] && key=REPOMANCER_AGENTS_REPO current="$CFG_AGENTS_REPO"
-        value="$(ask "Git URL (empty for the default)" "$current")"
+        value="$(input "Git URL" "$current" "empty: the default")" || continue
         if [[ -n "$value" ]] && ! GIT_TERMINAL_PROMPT=0 git ls-remote "$value" HEAD >/dev/null 2>&1; then
           echo "${RED}Can't reach $value with your git credentials; not saved.${RESET}"; continue
         fi
@@ -364,7 +389,7 @@ menu_header() {
 clear_screen() { clear 2>/dev/null || printf '\033[H\033[2J'; }
 
 menu_fzf() {
-  local out key selection
+  local out key selection mode
   while true; do
     out="$( { printf '%s\t%s\n' "$NEW_KEY" "${GREEN}+ New workspace…${RESET}" \
                                 "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
@@ -376,12 +401,18 @@ menu_fzf() {
             --preview-window='right,50%,<70(down,50%)' )" || return 0
     key="$(head -1 <<<"$out")"
     selection="$(sed -n 2p <<<"$out" | cut -f1)"
-    case "$key:$selection" in
-      ctrl-n:*|*:"$NEW_KEY")   new_workspace tab ;;
-      ctrl-s:*|*:"$SETTINGS_KEY") settings ;;
-      ctrl-v:?*)               open_workspace vsplit "$selection" ;;
-      ctrl-h:?*)               open_workspace hsplit "$selection" ;;
-      *:?*)                    open_workspace tab "$selection" ;;
+    # ctrl-n / ctrl-s act wherever the cursor is; otherwise the row decides,
+    # and ctrl-v / ctrl-h choose where it opens.
+    case "$key" in ctrl-v) mode=vsplit ;; ctrl-h) mode=hsplit ;; *) mode=tab ;; esac
+    case "$key" in
+      ctrl-n) new_workspace tab ;;
+      ctrl-s) settings ;;
+      *) case "$selection" in
+           "")              ;;
+           "$NEW_KEY")      new_workspace "$mode" ;;
+           "$SETTINGS_KEY") settings ;;
+           *)               open_workspace "$mode" "$selection" ;;
+         esac ;;
     esac
   done
 }

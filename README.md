@@ -50,7 +50,7 @@ scry --list    # just print the list
 | <kbd>Enter</kbd> | open the workspace in a new iTerm2 tab (in a new window if iTerm2 has none open). It runs `repomancer <workspace>`, so the Claude session resumes |
 | <kbd>⌃V</kbd> | open it in a new iTerm2 pane beside the one `scry` runs in |
 | <kbd>⌃H</kbd> | open it in a new iTerm2 pane below the one `scry` runs in |
-| <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, then runs `repomancer` in a new tab |
+| <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, shows a summary to confirm, then runs `repomancer` in a new tab (<kbd>⌃V</kbd>/<kbd>⌃H</kbd> on **+ New workspace…** start it in a pane instead). <kbd>Esc</kbd> cancels at any step; without fzf, type `q` |
 | <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), or open the config file in your editor |
 | <kbd>Esc</kbd> | quit |
 
