@@ -7,7 +7,7 @@
 #
 # In the menu:
 #   enter    open the workspace in a new iTerm2 tab (resumes its Claude session)
-#   ctrl-w   open it in a new iTerm2 window instead
+#   ctrl-v   open it in a new iTerm2 pane, split off the current one
 #   ctrl-n   new workspace (runs repomancer in a new tab)
 #   ctrl-s   settings
 #   esc      quit
@@ -127,8 +127,9 @@ preview() {
 }
 
 # --- iTerm2 ----------------------------------------------------------------
-# iterm_run <tab|window> <command>: run a command in a new iTerm2 tab of the
-# current window (a new window if there is none), or in a new window.
+# iterm_run <tab|pane> <command>: run a command in a new iTerm2 tab of the
+# current window, or in a new pane split off the current session (the one
+# scry runs in, when it runs in iTerm2). With no window open, both open one.
 iterm_run() {
   local mode="$1" cmd="$2"
   [[ -d /Applications/iTerm.app || -d "$HOME/Applications/iTerm.app" ]] || die "iTerm2 isn't installed"
@@ -138,13 +139,19 @@ on run argv
   set cmd to item 2 of argv
   tell application "iTerm"
     activate
-    if mode is "window" or (count of windows) is 0 then
-      set w to (create window with default profile)
+    if (count of windows) is 0 then
+      set s to current session of (create window with default profile)
+    else if mode is "pane" then
+      tell current session of current window
+        set s to (split vertically with default profile)
+      end tell
     else
-      set w to current window
-      tell w to create tab with default profile
+      tell current window
+        set t to (create tab with default profile)
+      end tell
+      set s to current session of t
     end if
-    tell current session of w to write text cmd
+    tell s to write text cmd
   end tell
 end run
 APPLESCRIPT
@@ -162,7 +169,7 @@ repomancer_cmd() {
   echo "$cmd"
 }
 
-open_workspace() {  # <tab|window> <name>
+open_workspace() {  # <tab|pane> <name>
   iterm_run "$1" "$(repomancer_cmd "$2")"
   echo "Opened $2 in a new iTerm2 $1."
 }
@@ -197,7 +204,7 @@ intents() {
   repomancer --list-intents 2>/dev/null | sed -n 's/^  //p'
 }
 
-new_workspace() {  # [tab|window]
+new_workspace() {  # [tab|pane]
   local mode="${1:-tab}" branch base intent default_intent options=() i
   echo; echo "${BOLD}New workspace${RESET}"
   branch="$(ask "Branch name")"
@@ -305,8 +312,8 @@ menu_fzf() {
                                 "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
               menu_lines; } \
       | fzf --ansi --reverse --height=~90% --delimiter=$'\t' --with-nth=2.. \
-            --prompt="scry > " --expect=ctrl-w,ctrl-n,ctrl-s \
-            --header="enter: open in new tab · ctrl-w: new window · ctrl-n: new · ctrl-s: settings · esc: quit
+            --prompt="scry > " --expect=ctrl-v,ctrl-n,ctrl-s \
+            --header="enter: open in new tab · ctrl-v: new pane · ctrl-n: new · ctrl-s: settings · esc: quit
 $ROOT" \
             --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
             --preview-window=right,50%,wrap )" || return 0
@@ -315,7 +322,7 @@ $ROOT" \
     case "$key:$selection" in
       ctrl-n:*|*:"$NEW_KEY")   new_workspace tab ;;
       ctrl-s:*|*:"$SETTINGS_KEY") settings ;;
-      ctrl-w:?*)               open_workspace window "$selection" ;;
+      ctrl-v:?*)               open_workspace pane "$selection" ;;
       *:?*)                    open_workspace tab "$selection" ;;
     esac
   done
@@ -331,12 +338,12 @@ menu_plain() {
     done < <(menu_lines)
     (( ${#names[@]} )) || echo "    (none yet)"
     echo "  n) new workspace   s) settings   q) quit"
-    read -r -p "Open which? (number, or w<number> for a new window): " n || return 0
+    read -r -p "Open which? (number, or p<number> for a new pane): " n || return 0
     case "$n" in
       q|Q|"") return 0 ;;
       n|N) new_workspace tab ;;
       s|S) settings ;;
-      w[0-9]*) n="${n#w}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace window "${names[$((n - 1))]}" ;;
+      p[0-9]*) n="${n#p}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace pane "${names[$((n - 1))]}" ;;
       [0-9]*) (( n >= 1 && n <= ${#names[@]} )) && open_workspace tab "${names[$((n - 1))]}" ;;
       *) echo "?" ;;
     esac
