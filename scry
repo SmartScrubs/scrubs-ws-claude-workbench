@@ -20,6 +20,7 @@ set -euo pipefail
 
 die()  { echo "scry: $*" >&2; exit 1; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+tilde() { printf '%s' "${1/#$HOME/~}"; }   # /Users/me/x → ~/x, for display
 # fit <width> <text>: shorten to width, marking the cut with "~"
 fit() { if (( ${#2} > $1 )); then printf '%s~' "${2:0:$(( $1 - 1 ))}"; else printf '%s' "$2"; fi; }
 
@@ -95,29 +96,42 @@ collect() {
 }
 
 # Lines for the menu: "<key>\t<display>". The key is the folder name.
+# "3 changed, 2 unpushed" / "clean"
+state_text() {  # <changed> <unpushed>
+  local t=""
+  (( $1 > 0 )) && t="$1 changed"
+  (( $2 > 0 )) && t="${t:+$t, }$2 unpushed"
+  echo "${t:-clean}"
+}
+
+# Lines for the menu: "<key>\t<display>". The key is the folder name. Status
+# comes early so it stays visible beside the preview; the branch is only shown
+# when it differs from the folder name.
 menu_lines() {
-  local epoch name branch intent changed unpushed state
+  local epoch name branch intent changed unpushed color extra
   while IFS=$'\t' read -r epoch name branch intent changed unpushed; do
-    state=""
-    (( changed > 0 ))  && state+="${YELLOW}${changed} changed${RESET} "
-    (( unpushed > 0 )) && state+="${RED}${unpushed} unpushed${RESET}"
-    [[ -n "$state" ]] || state="${GREEN}clean${RESET}"
-    printf '%s\t%-30s %s%-26s %-8s %4s%s  %s\n' "$name" "$(fit 30 "$name")" "$DIM" "$(fit 26 "$branch")" "$(fit 8 "$intent")" "$(ago "$epoch")" "$RESET" "$state"
+    if   (( unpushed > 0 )); then color="$RED"
+    elif (( changed > 0 ));  then color="$YELLOW"
+    else color="$GREEN"; fi
+    extra=""; [[ "$branch" == "$name" ]] || extra="  ${DIM}⎇ $branch${RESET}"
+    printf '%s\t%-28s %4s  %s%-22s%s %-8s%s\n' "$name" "$(fit 28 "$name")" "$(ago "$epoch")" \
+      "$color" "$(state_text "$changed" "$unpushed")" "$RESET" "$(fit 8 "$intent")" "$extra"
   done < <(collect)
 }
 
 list_plain() {
   local epoch name branch intent changed unpushed
-  printf '%-30s %-26s %-8s %4s  %s\n' WORKSPACE BRANCH INTENT AGE STATUS
+  printf '%-28s %4s  %-22s %-8s %s\n' WORKSPACE AGE STATUS INTENT BRANCH
   while IFS=$'\t' read -r epoch name branch intent changed unpushed; do
-    printf '%-30s %-26s %-8s %4s  %s changed, %s unpushed\n' "$(fit 30 "$name")" "$(fit 26 "$branch")" "$(fit 8 "$intent")" "$(ago "$epoch")" "$changed" "$unpushed"
+    printf '%-28s %4s  %-22s %-8s %s\n' "$(fit 28 "$name")" "$(ago "$epoch")" \
+      "$(state_text "$changed" "$unpushed")" "$(fit 8 "$intent")" "$branch"
   done < <(collect)
 }
 
 preview() {
   local d="$ROOT/$1"
   [[ -d "$d" ]] || { echo "$1"; return 0; }
-  echo "${BOLD}$1${RESET}  ${DIM}$d${RESET}"
+  echo "${BOLD}$1${RESET}  ${DIM}$(tilde "$d")${RESET}"
   local agents="none"
   [[ -f "$d/AGENTS.md" ]] && agents="$(head -1 "$d/AGENTS.md" | sed 's/^# *//; s/^AGENTS\.md: *//')"
   echo "intent: $(git -C "$d" config repomancer.intent 2>/dev/null || echo -)   AGENTS.md: $agents"
@@ -179,7 +193,8 @@ open_workspace() {  # <tab|vsplit|hsplit> <name>
   local where
   case "$1" in vsplit) where="pane beside this one" ;; hsplit) where="pane below this one" ;; *) where="tab" ;; esac
   iterm_run "$1" "$(repomancer_cmd "$2")"
-  echo "Opened $2 in a new iTerm2 $where."
+  STATUS="Opened $2 in a new iTerm2 $where."
+  echo "$STATUS"
 }
 
 # --- prompts ---------------------------------------------------------------
@@ -214,7 +229,7 @@ intents() {
 
 new_workspace() {  # [tab|vsplit|hsplit]
   local mode="${1:-tab}" branch base intent default_intent options=() i
-  echo; echo "${BOLD}New workspace${RESET}"
+  clear_screen; echo "${BOLD}New workspace${RESET}"
   branch="$(ask "Branch name")"
   [[ -n "$branch" ]] || { echo "Cancelled."; return 0; }
   if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
@@ -233,7 +248,8 @@ new_workspace() {  # [tab|vsplit|hsplit]
   [[ -n "$intent" ]] || intent="$default_intent"
 
   iterm_run "$mode" "$(repomancer_cmd "$branch" ${base:+"$base"} --intent "$intent")"
-  echo "Started $branch ($intent) in a new iTerm2 $mode."
+  STATUS="Started $branch ($intent) in a new iTerm2 $mode."
+  echo "$STATUS"
 }
 
 # --- settings --------------------------------------------------------------
@@ -268,6 +284,7 @@ describe() {  # <env value> <config value> <default>
 
 settings() {
   local choice value
+  clear_screen
   while true; do
     load_settings
     echo
@@ -306,12 +323,23 @@ settings() {
         "${VISUAL:-${EDITOR:-nano}}" "$CONFIG" ;;
       *) return 0 ;;
     esac
-    echo "${GREEN}Saved to $CONFIG${RESET}"
+    STATUS="Saved to $CONFIG"; echo "${GREEN}$STATUS${RESET}"
   done
 }
 
 # --- menus -----------------------------------------------------------------
 NEW_KEY="__new__" SETTINGS_KEY="__settings__"
+STATUS=""   # result of the last action, shown at the top of the menu
+
+# Short lines, so the help fits beside the preview pane.
+menu_header() {
+  echo "enter tab · ^V pane beside · ^H pane below"
+  echo "^N new · ^S settings · esc quit"
+  echo "${DIM}$(tilde "$ROOT")${RESET}"
+  [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
+}
+
+clear_screen() { clear 2>/dev/null || printf '\033[H\033[2J'; }
 
 menu_fzf() {
   local out key selection
@@ -319,12 +347,11 @@ menu_fzf() {
     out="$( { printf '%s\t%s\n' "$NEW_KEY" "${GREEN}+ New workspace…${RESET}" \
                                 "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
               menu_lines; } \
-      | fzf --ansi --reverse --height=~90% --delimiter=$'\t' --with-nth=2.. \
+      | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. \
             --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-s \
-            --header="enter: new tab · ctrl-v: pane beside · ctrl-h: pane below · ctrl-n: new · ctrl-s: settings · esc: quit
-$ROOT" \
+            --header="$(menu_header)" \
             --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
-            --preview-window=right,50%,wrap )" || return 0
+            --preview-window='right,50%,<70(down,50%)' )" || return 0
     key="$(head -1 <<<"$out")"
     selection="$(sed -n 2p <<<"$out" | cut -f1)"
     case "$key:$selection" in
@@ -341,7 +368,9 @@ menu_plain() {
   local names=() line n
   while true; do
     names=()
-    echo; echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $ROOT${RESET}"
+    clear_screen
+    echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $(tilde "$ROOT")${RESET}"
+    [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
     while IFS=$'\t' read -r key line; do
       names+=("$key"); printf '%3d) %s\n' "${#names[@]}" "$line"
     done < <(menu_lines)
