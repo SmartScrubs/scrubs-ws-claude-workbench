@@ -424,13 +424,49 @@ fi
 
 # --- GitHub ----------------------------------------------------------------
 step "GitHub sign-in"
-if [[ -n "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
-  warn "GITHUB_TOKEN/GH_TOKEN is set in your environment and overrides 'gh auth login'"
-fi
+# A GITHUB_TOKEN/GH_TOKEN in the environment stops 'gh auth login' from storing
+# a login, and gh hands that token to git instead. Such tokens usually lack the
+# 'repo' scope, so private SmartScrubs repos come back as "not found". Explain
+# where the token comes from and how to get rid of it, once.
+TOKEN_VARS=""
+[[ -n "${GITHUB_TOKEN:-}" ]] && TOKEN_VARS="GITHUB_TOKEN"
+[[ -n "${GH_TOKEN:-}" ]] && TOKEN_VARS="${TOKEN_VARS:+$TOKEN_VARS and }GH_TOKEN"
+TOKEN_ADVICE_SHOWN=""
+token_advice() {
+  [[ -n "$TOKEN_ADVICE_SHOWN" ]] && return 0
+  TOKEN_ADVICE_SHOWN=1
+  local hits f rc_files=() verb="is"
+  [[ "$TOKEN_VARS" == *" and "* ]] && verb="are"
+  warn "$TOKEN_VARS $verb set in your environment. 'gh auth login' can't store a login while"
+  warn "that's there, and git sends that token to GitHub instead of your login. Tokens like this"
+  warn "usually can't read private SmartScrubs repos."
+  for f in ~/.zshenv ~/.zprofile ~/.zshrc ~/.zlogin ~/.bash_profile ~/.bashrc ~/.profile ~/.config/fish/config.fish; do
+    [[ -f "$f" ]] && rc_files+=("$f")
+  done
+  hits=""
+  # -H: always show the file name. The value itself is masked; it's a secret.
+  [[ ${#rc_files[@]} -gt 0 ]] && hits="$(grep -H -n -E '(GITHUB_TOKEN|GH_TOKEN)=' "${rc_files[@]}" 2>/dev/null \
+    | sed -E "s|^$HOME|~|; s/(TOKEN=)[\"']?[^\"' ]+[\"']?/\1…/" || true)"
+  if [[ -n "$hits" ]]; then
+    echo "      It's set here:" >&2
+    while IFS= read -r f; do echo "        $f" >&2; done <<<"$hits"
+  else
+    echo "      It isn't set in your shell startup files, so it comes from somewhere else:" >&2
+    echo "      a tool like direnv or 1Password, your terminal app's profile, or launchctl setenv." >&2
+  fi
+  echo "      To fix it:" >&2
+  echo "        1. Delete that line (or the setting that creates it)." >&2
+  echo "        2. Open a new terminal and check it's gone:  env | grep -E '^(GITHUB_TOKEN|GH_TOKEN)='" >&2
+  echo "        3. Sign in and let git use that login:  gh auth login --web && gh auth setup-git" >&2
+  echo "        4. Re-run this installer." >&2
+  echo "      If another tool needs the token, give it the 'repo' scope at github.com/settings/tokens instead." >&2
+}
 if ! command -v gh >/dev/null 2>&1; then
   [[ -n "$DRY_RUN" ]] && echo "    + gh auth login --hostname github.com --git-protocol https --web"
 elif gh auth status --hostname github.com >/dev/null 2>&1; then
   ok "signed in to GitHub as $(gh api user --jq .login 2>/dev/null || echo '?')"
+elif [[ -n "$TOKEN_VARS" ]]; then
+  token_advice
 elif confirm "Sign in to GitHub now? (opens your browser)"; then
   run gh auth login --hostname github.com --git-protocol https --web || warn "GitHub sign-in failed; run: gh auth login"
 else
@@ -446,9 +482,9 @@ if [[ -n "$DRY_RUN" ]]; then
   echo "    + (if git can't clone SmartScrubs/scrubs yet) gh auth setup-git --hostname github.com"
 elif can_clone_scrubs; then
   ok "git can access SmartScrubs/scrubs"
-elif [[ -n "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
-  warn "git can't access SmartScrubs/scrubs. GITHUB_TOKEN/GH_TOKEN is set in your environment;"
-  warn "remove it (or give it 'repo' scope), then re-run this installer"
+elif [[ -n "$TOKEN_VARS" ]]; then
+  warn "git can't access SmartScrubs/scrubs."
+  token_advice
 elif command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
   run gh auth setup-git --hostname github.com
   if can_clone_scrubs; then

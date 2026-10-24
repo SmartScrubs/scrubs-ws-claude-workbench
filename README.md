@@ -88,7 +88,7 @@ It asks before each sign-in step:
 | Step | What happens |
 |------|--------------|
 | git name and email | Asks for them if they aren't set yet, and offers to change them if they are |
-| GitHub | `gh auth login` in your browser, then `gh auth setup-git` so git can clone private SmartScrubs repos over HTTPS. Then it checks you can reach `SmartScrubs/scrubs` |
+| GitHub | `gh auth login` in your browser, then `gh auth setup-git` so git can clone private SmartScrubs repos over HTTPS. Then it checks you can reach `SmartScrubs/scrubs`. If a `GITHUB_TOKEN` or `GH_TOKEN` is set in your shell, it tells you which startup file sets it and how to remove it: such tokens block `gh auth login` and usually can't read private repos |
 | AWS | Choose `aws login` (browser sign-in with your console login), `aws configure sso`, `aws configure` (access keys), or skip |
 | Claude Code | `claude auth login` in your browser |
 
