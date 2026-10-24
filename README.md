@@ -114,6 +114,8 @@ Options:
 
 At the end it checks every MCP server Claude Code can see (`claude mcp list`) and lists any that need signing in or failed to connect. Sign in to the ones you need from Claude Code with `/mcp`, then open a new terminal.
 
+Finally, it offers to open `scry` in iTerm2: in a new tab if iTerm2 is already running, otherwise in the window iTerm2 opens when it starts.
+
 ### Markdown preview in Sublime Text
 
 Open a `.md` file, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> and run **Markdown Preview: Preview in Browser**. If Sublime was open while the installer ran, restart it first so Package Control can install the package.

@@ -627,13 +627,53 @@ fi
 cat <<'EOF'
     Next steps:
       1. Sign in to any MCP servers you need (claude → /mcp)
-      2. Start a workspace:        repomancer my-feature
+      2. See your workspaces:      scry
+         or start one directly:    repomancer my-feature
 
     Anything skipped above can be finished later with:
       gh auth login && gh auth setup-git
       aws login
       claude auth login
 EOF
+
+# Offer to open scry in iTerm2. A new iTerm2 session loads the updated shell
+# config, so scry is on PATH there even on a fresh Mac. If iTerm2 isn't
+# running yet, use the window it opens at launch instead of adding a second.
+if [[ -d "/Applications/iTerm.app" || -d "$HOME/Applications/iTerm.app" ]] \
+   && [[ -x "$LOCAL_BIN/scry" || -n "$DRY_RUN" ]]; then
+  if [[ -n "$DRY_RUN" ]]; then
+    echo
+    echo "    + (ask) open scry in iTerm2"
+  elif [[ -n "$INTERACTIVE" ]] && echo && confirm "Open scry in iTerm2 now?"; then
+    echo "    (The first time, macOS asks whether this terminal may control iTerm2: allow it.)"
+    osascript - "scry" >/dev/null <<'APPLESCRIPT' || warn "couldn't open iTerm2; run scry in a new terminal"
+on run argv
+  set cmd to item 1 of argv
+  set wasRunning to (application "iTerm" is running)
+  tell application "iTerm"
+    activate
+    if not wasRunning then
+      repeat 20 times
+        if (count of windows) > 0 then exit repeat
+        delay 0.25
+      end repeat
+    end if
+    if (count of windows) is 0 then
+      set s to current session of (create window with default profile)
+    else if wasRunning then
+      tell current window
+        set t to (create tab with default profile)
+      end tell
+      set s to current session of t
+    else
+      set s to current session of current window
+    end if
+    tell s to write text cmd
+  end tell
+end run
+APPLESCRIPT
+  fi
+fi
 
 # A script can't change the shell that started it, so if we edited the zsh
 # config, hand over to a fresh login shell that has it loaded. Read from the
