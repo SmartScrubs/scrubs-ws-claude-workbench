@@ -19,6 +19,8 @@ set -euo pipefail
 
 die()  { echo "scry: $*" >&2; exit 1; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# fit <width> <text>: shorten to width, marking the cut with "~"
+fit() { if (( ${#2} > $1 )); then printf '%s~' "${2:0:$(( $1 - 1 ))}"; else printf '%s' "$2"; fi; }
 
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/repomancer/config"
 DEFAULT_ROOT="$HOME/Documents/AIProjects"
@@ -99,15 +101,15 @@ menu_lines() {
     (( changed > 0 ))  && state+="${YELLOW}${changed} changed${RESET} "
     (( unpushed > 0 )) && state+="${RED}${unpushed} unpushed${RESET}"
     [[ -n "$state" ]] || state="${GREEN}clean${RESET}"
-    printf '%s\t%-32s %s%-24s %-9s %4s%s  %s\n' "$name" "$name" "$DIM" "$branch" "$intent" "$(ago "$epoch")" "$RESET" "$state"
+    printf '%s\t%-30s %s%-26s %-8s %4s%s  %s\n' "$name" "$(fit 30 "$name")" "$DIM" "$(fit 26 "$branch")" "$(fit 8 "$intent")" "$(ago "$epoch")" "$RESET" "$state"
   done < <(collect)
 }
 
 list_plain() {
   local epoch name branch intent changed unpushed
-  printf '%-32s %-24s %-9s %5s  %s\n' WORKSPACE BRANCH INTENT AGE STATUS
+  printf '%-30s %-26s %-8s %4s  %s\n' WORKSPACE BRANCH INTENT AGE STATUS
   while IFS=$'\t' read -r epoch name branch intent changed unpushed; do
-    printf '%-32s %-24s %-9s %5s  %s changed, %s unpushed\n' "$name" "$branch" "$intent" "$(ago "$epoch")" "$changed" "$unpushed"
+    printf '%-30s %-26s %-8s %4s  %s changed, %s unpushed\n' "$(fit 30 "$name")" "$(fit 26 "$branch")" "$(fit 8 "$intent")" "$(ago "$epoch")" "$changed" "$unpushed"
   done < <(collect)
 }
 
