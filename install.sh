@@ -174,22 +174,57 @@ if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
   [[ -f "$dir/repomancer" ]] && SCRIPT_DIR="$dir"
 fi
 
-# --- Homebrew --------------------------------------------------------------
-step "Homebrew"
-if [[ -x /opt/homebrew/bin/brew ]]; then
-  BREW=/opt/homebrew/bin/brew
-elif [[ -x /usr/local/bin/brew ]]; then
-  BREW=/usr/local/bin/brew
-else
-  BREW=""
+# --- Mac and developer tools -----------------------------------------------
+step "Mac and developer tools"
+APPLE_SILICON=""
+[[ "$(sysctl -n hw.optional.arm64 2>/dev/null)" == 1 ]] && APPLE_SILICON=1
+if [[ -n "$APPLE_SILICON" && "$(sysctl -n sysctl.proc_translated 2>/dev/null)" == 1 ]]; then
+  die "this terminal runs under Rosetta (Intel emulation). Open one without \"Open using Rosetta\" and re-run."
+fi
+ok "$([[ -n "$APPLE_SILICON" ]] && echo "Apple Silicon" || echo "Intel") Mac, macOS $(sw_vers -productVersion 2>/dev/null)"
+
+# Apple's git and compilers come from the developer folder xcode-select points
+# at. A Mac migrated from an Intel Mac can point at an old Intel-only Xcode,
+# and then they fail ("incompatible architecture"). With no developer tools at
+# all, the Homebrew installer below installs the Command Line Tools itself.
+CLT=/Library/Developer/CommandLineTools
+if dev_dir="$(xcode-select -p 2>/dev/null)"; then
+  if /usr/bin/git --version >/dev/null 2>&1; then
+    ok "developer tools work ($dev_dir)"
+  else
+    warn "Apple's developer tools in $dev_dir don't work (often an old, Intel-only Xcode)"
+    if [[ -n "$DRY_RUN" ]]; then
+      echo "    + sudo xcode-select --switch $CLT"
+    elif [[ -x "$CLT/usr/bin/git" ]]; then
+      if [[ -n "$ASSUME_YES" ]] || confirm "Use Apple's Command Line Tools instead? (asks for your password)"; then
+        run sudo xcode-select --switch "$CLT" || die "couldn't switch. Run: sudo xcode-select --switch $CLT"
+        /usr/bin/git --version >/dev/null 2>&1 || die "git still fails. Update or remove the old Xcode, then re-run this installer."
+        ok "developer tools work ($CLT)"
+      else
+        die "fix the developer tools first: sudo xcode-select --switch $CLT"
+      fi
+    else
+      run xcode-select --install || true
+      die "install the Command Line Tools in the window that opened, then re-run this installer"
+    fi
+  fi
 fi
 
-if [[ -n "$BREW" ]]; then
+# --- Homebrew --------------------------------------------------------------
+# Apple Silicon Macs need the native Homebrew in /opt/homebrew. A Homebrew in
+# /usr/local on such a Mac is the Intel one (it runs through Rosetta), usually
+# brought over from an older Mac. It's left alone; the native one goes next to it.
+step "Homebrew"
+if [[ -n "$APPLE_SILICON" ]]; then BREW=/opt/homebrew/bin/brew; else BREW=/usr/local/bin/brew; fi
+if [[ -x "$BREW" ]]; then
   ok "installed ($BREW)"
 else
+  if [[ -n "$APPLE_SILICON" && -x /usr/local/bin/brew ]]; then
+    warn "found an Intel Homebrew in /usr/local, which runs through Rosetta. Installing the"
+    warn "native Apple Silicon Homebrew in /opt/homebrew; the old one is left as it is."
+  fi
   run_remote /bin/bash https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
     || die "Homebrew install failed (see its output above). Fix what it reports, then re-run this installer."
-  if [[ "$(uname -m)" == "arm64" ]]; then BREW=/opt/homebrew/bin/brew; else BREW=/usr/local/bin/brew; fi
 fi
 add_line "$ZPROFILE" "eval \"\$($BREW shellenv)\""
 if [[ -x "$BREW" ]]; then
@@ -206,13 +241,17 @@ fi
 # update. Homebrew 4+ doesn't need those copies, so remove them.
 brew_update() { brew update 2>&1; }
 
-# Remove one of the old tap copies; fall back to unshallowing it.
+# Remove one of the old tap copies. Homebrew 4+ gets packages from its API and
+# doesn't need them; older versions do, so download their full history instead.
 fix_shallow_tap() {
-  local tap="$1"
+  local tap="$1" major
   brew tap 2>/dev/null | grep -qx "$tap" || return 0
-  run brew untap "$tap" && return 0
-  run brew untap --force "$tap" && return 0
-  warn "couldn't remove $tap; downloading its full history instead (this can take a while)"
+  major="$(brew --version 2>/dev/null | head -1 | sed -E 's/^Homebrew ([0-9]+).*/\1/')"
+  if [[ "$major" =~ ^[0-9]+$ ]] && (( major >= 4 )); then
+    run brew untap "$tap" && return 0
+    run brew untap --force "$tap" && return 0
+  fi
+  warn "downloading the full history of $tap instead (this can take a while)"
   run git -C "$(brew --repo "$tap")" fetch --unshallow
 }
 
