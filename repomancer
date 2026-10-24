@@ -178,6 +178,28 @@ fi
 git config push.autoSetupRemote true
 git config push.default current
 
+# --- bundled Maven jars ----------------------------------------------------
+# Some jars aren't in any public Maven repo (e.g. mysterymeat:jconn4). The repo
+# ships them in Libraries/ and installs them into ~/.m2 with install-file, but
+# only during `mvn clean`, so any other build fails on a fresh machine. Run that
+# clean now, in just the modules that do it.
+INSTALL_POMS=()
+while IFS= read -r pom; do INSTALL_POMS+=("$pom"); done \
+  < <(git grep -l '<goal>install-file</goal>' -- '*pom.xml' 2>/dev/null || true)
+if [[ ${#INSTALL_POMS[@]} -gt 0 ]]; then
+  if ! command -v mvn >/dev/null; then
+    warn "mvn not found; bundled jars not installed. Run 'mvn clean' once in: ${INSTALL_POMS[*]}"
+  else
+    echo "→ Installing bundled jars into the local Maven repository (mvn clean in ${#INSTALL_POMS[@]} modules)"
+    for pom in "${INSTALL_POMS[@]}"; do
+      if ! MVN_LOG="$(mvn -B -q -N -f "$pom" clean 2>&1)"; then
+        printf '%s\n' "$MVN_LOG" | grep '^\[ERROR\]' | head -6 >&2
+        warn "couldn't install the jars from $pom; retry with: mvn -N -f $pom clean"
+      fi
+    done
+  fi
+fi
+
 # --- AGENTS.md -------------------------------------------------------------
 # Excluded in this clone only (.git/info/exclude), so it can't be committed by
 # accident and the repo's own .gitignore stays untouched. A tracked AGENTS.md

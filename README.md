@@ -15,8 +15,9 @@ What it does:
 2. Clones the repo into `~/Documents/AIProjects/my-feature`, wherever you run `repomancer` from (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). See [Configuration](#configuration) to use a different folder.
 3. Creates the branch from the base branch (the second argument, or the repo's default branch if you leave it out) and switches to it. If the branch already exists on `origin`, it checks that one out instead and ignores the base branch.
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
-5. Copies an `AGENTS.md` for the chosen [intent](#intents) into the workspace, so Claude starts out knowing what kind of work it's there for.
-6. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
+5. Installs the jars that `scrubs` ships in its `Libraries/` folders because no public Maven repo has them (`mysterymeat:jconn4`, `JTOpen` and `stringtemplate-keyvaluecoding`) into `~/.m2`. The poms only install them during `mvn clean`, so without this, any other build fails on a new Mac. repomancer runs `mvn clean` in just the modules that do this. The first time, Maven downloads its plugins, which takes about a minute; after that it takes a second or two. If it fails, repomancer prints the command to retry and opens Claude anyway.
+6. Copies an `AGENTS.md` for the chosen [intent](#intents) into the workspace, so Claude starts out knowing what kind of work it's there for.
+7. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
 
 If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch and intent are ignored in that case, and its `AGENTS.md` is left as it is.
 
