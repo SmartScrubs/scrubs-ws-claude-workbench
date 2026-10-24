@@ -48,10 +48,13 @@ scry --list    # just print the list
 |-----|--------|
 | type | filter the list |
 | <kbd>Enter</kbd> | open the workspace in a new iTerm2 tab (in a new window if iTerm2 has none open). It runs `repomancer <workspace>`, so the Claude session resumes |
-| <kbd>⌃V</kbd> | open it in a new iTerm2 pane instead, split off the one `scry` runs in |
+| <kbd>⌃V</kbd> | open it in a new iTerm2 pane beside the one `scry` runs in |
+| <kbd>⌃H</kbd> | open it in a new iTerm2 pane below the one `scry` runs in |
 | <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, then runs `repomancer` in a new tab |
 | <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), or open the config file in your editor |
 | <kbd>Esc</kbd> | quit |
+
+In iTerm2, <kbd>⌃H</kbd> and Backspace are different keys unless you've turned on *Delete key sends ^H* in the profile's Keys settings. With that on, Backspace in `scry` opens a pane instead of deleting a character.
 
 The first time `scry` opens a tab, macOS asks whether your terminal may control iTerm2. Allow it. Without fzf, `scry` shows a numbered menu with the same options.
 

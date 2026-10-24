@@ -7,7 +7,8 @@
 #
 # In the menu:
 #   enter    open the workspace in a new iTerm2 tab (resumes its Claude session)
-#   ctrl-v   open it in a new iTerm2 pane, split off the current one
+#   ctrl-v   open it in a new iTerm2 pane beside the current one
+#   ctrl-h   open it in a new iTerm2 pane below the current one
 #   ctrl-n   new workspace (runs repomancer in a new tab)
 #   ctrl-s   settings
 #   esc      quit
@@ -127,8 +128,9 @@ preview() {
 }
 
 # --- iTerm2 ----------------------------------------------------------------
-# iterm_run <tab|pane> <command>: run a command in a new iTerm2 tab of the
-# current window, or in a new pane split off the current session (the one
+# iterm_run <tab|vsplit|hsplit> <command>: run a command in a new iTerm2 tab of
+# the current window, or in a new pane beside (vsplit) or below (hsplit) the
+# current session (the one
 # scry runs in, when it runs in iTerm2). With no window open, both open one.
 iterm_run() {
   local mode="$1" cmd="$2"
@@ -141,9 +143,13 @@ on run argv
     activate
     if (count of windows) is 0 then
       set s to current session of (create window with default profile)
-    else if mode is "pane" then
+    else if mode is "vsplit" then
       tell current session of current window
         set s to (split vertically with default profile)
+      end tell
+    else if mode is "hsplit" then
+      tell current session of current window
+        set s to (split horizontally with default profile)
       end tell
     else
       tell current window
@@ -169,9 +175,11 @@ repomancer_cmd() {
   echo "$cmd"
 }
 
-open_workspace() {  # <tab|pane> <name>
+open_workspace() {  # <tab|vsplit|hsplit> <name>
+  local where
+  case "$1" in vsplit) where="pane beside this one" ;; hsplit) where="pane below this one" ;; *) where="tab" ;; esac
   iterm_run "$1" "$(repomancer_cmd "$2")"
-  echo "Opened $2 in a new iTerm2 $1."
+  echo "Opened $2 in a new iTerm2 $where."
 }
 
 # --- prompts ---------------------------------------------------------------
@@ -204,7 +212,7 @@ intents() {
   repomancer --list-intents 2>/dev/null | sed -n 's/^  //p'
 }
 
-new_workspace() {  # [tab|pane]
+new_workspace() {  # [tab|vsplit|hsplit]
   local mode="${1:-tab}" branch base intent default_intent options=() i
   echo; echo "${BOLD}New workspace${RESET}"
   branch="$(ask "Branch name")"
@@ -312,8 +320,8 @@ menu_fzf() {
                                 "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
               menu_lines; } \
       | fzf --ansi --reverse --height=~90% --delimiter=$'\t' --with-nth=2.. \
-            --prompt="scry > " --expect=ctrl-v,ctrl-n,ctrl-s \
-            --header="enter: open in new tab · ctrl-v: new pane · ctrl-n: new · ctrl-s: settings · esc: quit
+            --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-s \
+            --header="enter: new tab · ctrl-v: pane beside · ctrl-h: pane below · ctrl-n: new · ctrl-s: settings · esc: quit
 $ROOT" \
             --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
             --preview-window=right,50%,wrap )" || return 0
@@ -322,7 +330,8 @@ $ROOT" \
     case "$key:$selection" in
       ctrl-n:*|*:"$NEW_KEY")   new_workspace tab ;;
       ctrl-s:*|*:"$SETTINGS_KEY") settings ;;
-      ctrl-v:?*)               open_workspace pane "$selection" ;;
+      ctrl-v:?*)               open_workspace vsplit "$selection" ;;
+      ctrl-h:?*)               open_workspace hsplit "$selection" ;;
       *:?*)                    open_workspace tab "$selection" ;;
     esac
   done
@@ -338,12 +347,14 @@ menu_plain() {
     done < <(menu_lines)
     (( ${#names[@]} )) || echo "    (none yet)"
     echo "  n) new workspace   s) settings   q) quit"
-    read -r -p "Open which? (number, or p<number> for a new pane): " n || return 0
+    read -r -p "Open which? (number; v<number> pane beside, h<number> pane below): " n || return 0
     case "$n" in
       q|Q|"") return 0 ;;
       n|N) new_workspace tab ;;
       s|S) settings ;;
-      p[0-9]*) n="${n#p}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace pane "${names[$((n - 1))]}" ;;
+      [vh][0-9]*)
+        local mode=vsplit; [[ "$n" == h* ]] && mode=hsplit
+        n="${n#?}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace "$mode" "${names[$((n - 1))]}" ;;
       [0-9]*) (( n >= 1 && n <= ${#names[@]} )) && open_workspace tab "${names[$((n - 1))]}" ;;
       *) echo "?" ;;
     esac
