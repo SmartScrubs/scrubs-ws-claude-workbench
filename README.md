@@ -35,6 +35,26 @@ Each new workspace gets an `AGENTS.md` from the private [SmartScrubs/agents-md](
 
 Claude Code reads `AGENTS.md` when there's no `CLAUDE.md` in the workspace or above it.
 
+## scry: your workspaces at a glance
+
+`scry` lists every workspace in your workspace folder, newest first. For each one it shows the branch, the intent, how long ago you last worked on it, and whether it has uncommitted or unpushed changes. A side panel previews the highlighted workspace's `git status` and recent commits.
+
+```sh
+scry           # interactive menu
+scry --list    # just print the list
+```
+
+| Key | Action |
+|-----|--------|
+| type | filter the list |
+| <kbd>Enter</kbd> | open the workspace in a new iTerm2 tab (in a new window if iTerm2 has none open). It runs `repomancer <workspace>`, so the Claude session resumes |
+| <kbd>⌃W</kbd> | open it in a new iTerm2 window instead |
+| <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, then runs `repomancer` in a new tab |
+| <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), or open the config file in your editor |
+| <kbd>Esc</kbd> | quit |
+
+The first time `scry` opens a tab, macOS asks whether your terminal may control iTerm2. Allow it. Without fzf, `scry` shows a numbered menu with the same options.
+
 ## Setup (new Mac)
 
 `install.sh` sets up everything the workbench needs, then walks you through signing in. It skips anything already installed or signed in, so it's safe to re-run.
@@ -43,7 +63,7 @@ Claude Code reads `AGENTS.md` when there's no `CLAUDE.md` in the workspace or ab
 |------|--------------------|
 | Homebrew | official installer, plus `brew shellenv` in `~/.zprofile` |
 | Oh My Zsh | official installer, run so it never replaces an existing `~/.zshrc`. Set to update itself automatically, without the "update now?" question when a terminal opens |
-| git, GitHub CLI, AWS CLI, uv | `brew install` |
+| git, GitHub CLI, AWS CLI, uv, fzf | `brew install` |
 | Maven | `brew install maven` |
 | Java 11, 21, 25 | `brew install --cask temurin@<version>`, unless a JDK of that version is already installed |
 | iTerm2, VS Code, Sublime Text | `brew install --cask`, plus the `code` and `subl` commands (linked into `~/.local/bin` if you installed the app by hand) |
@@ -52,7 +72,7 @@ Claude Code reads `AGENTS.md` when there's no `CLAUDE.md` in the workspace or ab
 | Claude Code plugins: sentry, postman, superpowers, comfy-cloud | `claude plugin install` (from `claude-plugins-official` and `comfy-skills`) |
 | AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
 | Claude Code extension for VS Code | `code --install-extension anthropic.claude-code` |
-| `repomancer` command | symlink in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
+| `repomancer` and `scry` commands | symlinks in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
 
 It asks before each sign-in step:
 

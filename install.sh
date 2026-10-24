@@ -6,7 +6,7 @@
 #   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
-#   the Claude Code VS Code extension, and the `repomancer` command.
+#   the Claude Code VS Code extension, and the `repomancer` and `scry` commands.
 #
 # Then walks you through credentials: git name/email, GitHub sign-in,
 # AWS sign-in and Claude Code sign-in.
@@ -222,6 +222,7 @@ brew_formula git git
 brew_formula gh gh
 brew_formula awscli aws
 brew_formula uv uvx   # the AWS MCP server runs via uvx
+brew_formula fzf fzf  # the menu in scry
 
 step "Maven and Java"
 brew_formula maven mvn
@@ -566,14 +567,21 @@ else
   run mkdir -p "$rm_root"
 fi
 
-step "repomancer command"
-if [[ "$(readlink "$LOCAL_BIN/repomancer" 2>/dev/null)" == "$SCRIPT_DIR/repomancer" ]]; then
-  ok "$LOCAL_BIN/repomancer already links to $SCRIPT_DIR/repomancer"
-else
-  run mkdir -p "$LOCAL_BIN"
-  run chmod +x "$SCRIPT_DIR/repomancer"
-  run ln -sf "$SCRIPT_DIR/repomancer" "$LOCAL_BIN/repomancer"
-fi
+step "repomancer and scry commands"
+for tool in repomancer scry; do
+  if [[ "$(readlink "$LOCAL_BIN/$tool" 2>/dev/null)" == "$SCRIPT_DIR/$tool" ]]; then
+    ok "$LOCAL_BIN/$tool already links to $SCRIPT_DIR/$tool"
+  else
+    run mkdir -p "$LOCAL_BIN"
+    run chmod +x "$SCRIPT_DIR/$tool"
+    run ln -sf "$SCRIPT_DIR/$tool" "$LOCAL_BIN/$tool"
+  fi
+  # Warn if another program called $tool comes first on PATH.
+  found="$(PATH="$LOCAL_BIN:$PATH" command -v "$tool" 2>/dev/null || true)"
+  if [[ -n "$found" && "$found" != "$LOCAL_BIN/$tool" ]]; then
+    warn "'$tool' runs $found, not $LOCAL_BIN/$tool; check your PATH"
+  fi
+done
 # repomancer used to be called ws; remove the old link once it no longer works.
 if [[ -L "$LOCAL_BIN/ws" && ! -e "$LOCAL_BIN/ws" && "$(readlink "$LOCAL_BIN/ws")" == */ws ]]; then
   run rm "$LOCAL_BIN/ws"

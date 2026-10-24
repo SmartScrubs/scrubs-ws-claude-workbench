@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# scry — look into your repomancer workspaces: list them, open one in iTerm2,
+# start a new one, or change repomancer's settings.
+#
+# Usage: scry              interactive menu (uses fzf when installed)
+#        scry --list       print the workspaces and exit
+#
+# In the menu:
+#   enter    open the workspace in a new iTerm2 tab (resumes its Claude session)
+#   ctrl-w   open it in a new iTerm2 window instead
+#   ctrl-n   new workspace (runs repomancer in a new tab)
+#   ctrl-s   settings
+#   esc      quit
+#
+# Reads the same settings as repomancer: environment variables, then
+# ~/.config/repomancer/config, then the defaults.
+
+set -euo pipefail
+
+die()  { echo "scry: $*" >&2; exit 1; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/repomancer/config"
+DEFAULT_ROOT="$HOME/Documents/AIProjects"
+DEFAULT_REPO="https://github.com/SmartScrubs/scrubs.git"
+DEFAULT_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
+
+# Same lookup as repomancer: environment, then config file, then default.
+ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
+ENV_INTENT="${REPOMANCER_INTENT:-}" ENV_AGENTS_REPO="${REPOMANCER_AGENTS_REPO:-}"
+# Read one setting from the config file. A subshell keeps the config from
+# changing this process's (exported) environment, which repomancer inherits.
+cfg_get() {
+  (
+    unset "$1"
+    # shellcheck source=/dev/null
+    [[ -f "$CONFIG" ]] && source "$CONFIG" >/dev/null 2>&1
+    eval "printf '%s' \"\${$1:-}\""
+  )
+}
+load_settings() {
+  CFG_ROOT="$(cfg_get REPOMANCER_ROOT)" CFG_REPO="$(cfg_get REPOMANCER_REPO)"
+  CFG_INTENT="$(cfg_get REPOMANCER_INTENT)" CFG_AGENTS_REPO="$(cfg_get REPOMANCER_AGENTS_REPO)"
+  ROOT="${ENV_ROOT:-${CFG_ROOT:-$DEFAULT_ROOT}}"
+  ROOT="${ROOT/#\~/$HOME}"
+}
+load_settings
+
+HAVE_FZF=""; command -v fzf >/dev/null 2>&1 && HAVE_FZF=1
+BOLD=$'\033[1m' DIM=$'\033[2m' RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m' RESET=$'\033[0m'
+
+# --- workspaces ------------------------------------------------------------
+# "3m", "5h", "2d", "6w"
+ago() {
+  local s=$(( $(date +%s) - $1 ))
+  if   (( s < 3600 ));   then echo "$(( s / 60 ))m"
+  elif (( s < 86400 ));  then echo "$(( s / 3600 ))h"
+  elif (( s < 1209600 )); then echo "$(( s / 86400 ))d"
+  else echo "$(( s / 604800 ))w"
+  fi
+}
+
+# Last activity: the newest Claude transcript for the folder, or else the last commit.
+last_activity() {
+  local dir="$1" pd newest t
+  pd="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(cd "$dir" && pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
+  newest="$(ls -t "$pd"/*.jsonl 2>/dev/null | head -1 || true)"
+  if [[ -n "$newest" ]]; then
+    stat -f %m "$newest"
+  else
+    t="$(git -C "$dir" log -1 --format=%ct 2>/dev/null || true)"
+    echo "${t:-0}"
+  fi
+}
+
+# One tab-separated line per workspace, newest first:
+#   epoch  name  branch  intent  changed-files  unpushed-commits
+collect() {
+  local d name
+  [[ -d "$ROOT" ]] || return 0
+  for d in "$ROOT"/*/; do
+    d="${d%/}"
+    [[ -e "$d/.git" ]] || continue
+    name="$(basename "$d")"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$(last_activity "$d")" "$name" \
+      "$(git -C "$d" branch --show-current 2>/dev/null || echo '?')" \
+      "$(git -C "$d" config repomancer.intent 2>/dev/null || echo '-')" \
+      "$(git -C "$d" status --porcelain 2>/dev/null | wc -l | tr -d ' ')" \
+      "$(git -C "$d" rev-list --count HEAD --not --remotes=origin 2>/dev/null || echo 0)"
+  done | sort -t$'\t' -k1,1nr
+}
+
+# Lines for the menu: "<key>\t<display>". The key is the folder name.
+menu_lines() {
+  local epoch name branch intent changed unpushed state
+  while IFS=$'\t' read -r epoch name branch intent changed unpushed; do
+    state=""
+    (( changed > 0 ))  && state+="${YELLOW}${changed} changed${RESET} "
+    (( unpushed > 0 )) && state+="${RED}${unpushed} unpushed${RESET}"
+    [[ -n "$state" ]] || state="${GREEN}clean${RESET}"
+    printf '%s\t%-32s %s%-24s %-9s %4s%s  %s\n' "$name" "$name" "$DIM" "$branch" "$intent" "$(ago "$epoch")" "$RESET" "$state"
+  done < <(collect)
+}
+
+list_plain() {
+  local epoch name branch intent changed unpushed
+  printf '%-32s %-24s %-9s %5s  %s\n' WORKSPACE BRANCH INTENT AGE STATUS
+  while IFS=$'\t' read -r epoch name branch intent changed unpushed; do
+    printf '%-32s %-24s %-9s %5s  %s changed, %s unpushed\n' "$name" "$branch" "$intent" "$(ago "$epoch")" "$changed" "$unpushed"
+  done < <(collect)
+}
+
+preview() {
+  local d="$ROOT/$1"
+  [[ -d "$d" ]] || { echo "$1"; return 0; }
+  echo "${BOLD}$1${RESET}  ${DIM}$d${RESET}"
+  local agents="none"
+  [[ -f "$d/AGENTS.md" ]] && agents="$(head -1 "$d/AGENTS.md" | sed 's/^# *//; s/^AGENTS\.md: *//')"
+  echo "intent: $(git -C "$d" config repomancer.intent 2>/dev/null || echo -)   AGENTS.md: $agents"
+  echo
+  git -C "$d" -c color.status=always status -sb 2>/dev/null | head -25
+  echo
+  git -C "$d" log --color=always --format='%C(yellow)%h%C(reset) %s %C(dim)(%cr)%C(reset)' -10 2>/dev/null
+}
+
+# --- iTerm2 ----------------------------------------------------------------
+# iterm_run <tab|window> <command>: run a command in a new iTerm2 tab of the
+# current window (a new window if there is none), or in a new window.
+iterm_run() {
+  local mode="$1" cmd="$2"
+  [[ -d /Applications/iTerm.app || -d "$HOME/Applications/iTerm.app" ]] || die "iTerm2 isn't installed"
+  osascript - "$mode" "$cmd" >/dev/null <<'APPLESCRIPT'
+on run argv
+  set mode to item 1 of argv
+  set cmd to item 2 of argv
+  tell application "iTerm"
+    activate
+    if mode is "window" or (count of windows) is 0 then
+      set w to (create window with default profile)
+    else
+      set w to current window
+      tell w to create tab with default profile
+    end if
+    tell current session of w to write text cmd
+  end tell
+end run
+APPLESCRIPT
+}
+
+# Build a repomancer command line. The new tab starts a fresh shell, so pass on
+# settings that only exist in this environment.
+repomancer_cmd() {
+  local cmd="" arg
+  [[ -n "$ENV_ROOT" ]] && cmd+="REPOMANCER_ROOT=$(printf %q "$ENV_ROOT") "
+  [[ -n "$ENV_REPO" ]] && cmd+="REPOMANCER_REPO=$(printf %q "$ENV_REPO") "
+  [[ -n "$ENV_AGENTS_REPO" ]] && cmd+="REPOMANCER_AGENTS_REPO=$(printf %q "$ENV_AGENTS_REPO") "
+  cmd+="repomancer"
+  for arg in "$@"; do cmd+=" $(printf %q "$arg")"; done
+  echo "$cmd"
+}
+
+open_workspace() {  # <tab|window> <name>
+  iterm_run "$1" "$(repomancer_cmd "$2")"
+  echo "Opened $2 in a new iTerm2 $1."
+}
+
+# --- prompts ---------------------------------------------------------------
+ask() {  # ask "Prompt" [default] → prints the answer
+  local reply
+  if [[ -n "${2:-}" ]]; then read -r -p "$1 [$2]: " reply; else read -r -p "$1: " reply; fi
+  echo "${reply:-${2:-}}"
+}
+
+# pick "Prompt" option... → prints the chosen option (empty if cancelled)
+pick() {
+  local prompt="$1"; shift
+  if [[ -n "$HAVE_FZF" ]]; then
+    printf '%s\n' "$@" | fzf --height=~15 --reverse --prompt="$prompt > " || true
+  else
+    local i=1 o n
+    for o in "$@"; do echo "  $i) $o" >&2; i=$((i + 1)); done
+    while true; do
+      read -r -p "$prompt (number, Enter to cancel): " n || return 0
+      [[ -n "$n" ]] || return 0
+      if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= $# )); then
+        eval "echo \"\${$n}\""; return 0
+      fi
+      echo "  Please enter a number from 1 to $#." >&2
+    done
+  fi
+}
+
+intents() {
+  repomancer --list-intents 2>/dev/null | sed -n 's/^  //p'
+}
+
+new_workspace() {  # [tab|window]
+  local mode="${1:-tab}" branch base intent default_intent options=() i
+  echo; echo "${BOLD}New workspace${RESET}"
+  branch="$(ask "Branch name")"
+  [[ -n "$branch" ]] || { echo "Cancelled."; return 0; }
+  if ! git check-ref-format --branch "$branch" >/dev/null 2>&1; then
+    echo "${RED}'$branch' isn't a valid branch name.${RESET}"; return 0
+  fi
+  if [[ -e "$ROOT/${branch//\//-}" ]]; then
+    echo "${YELLOW}$ROOT/${branch//\//-} already exists; it will be reopened.${RESET}"
+    open_workspace "$mode" "${branch//\//-}"; return 0
+  fi
+  base="$(ask "Base branch (Enter for the repo's default)")"
+
+  default_intent="$(lower "${ENV_INTENT:-${CFG_INTENT:-default}}")"
+  options=("$default_intent")
+  while IFS= read -r i; do [[ "$i" == "$default_intent" ]] || options+=("$i"); done < <(intents)
+  intent="$(pick "Intent" "${options[@]}")"
+  [[ -n "$intent" ]] || intent="$default_intent"
+
+  iterm_run "$mode" "$(repomancer_cmd "$branch" ${base:+"$base"} --intent "$intent")"
+  echo "Started $branch ($intent) in a new iTerm2 $mode."
+}
+
+# --- settings --------------------------------------------------------------
+# set_config KEY [VALUE]: write KEY="VALUE" to the config file, replacing the
+# first KEY= line (commented out or not). No VALUE comments the setting out,
+# which restores the default.
+set_config() {
+  local key="$1" value="${2:-}" line done="" tmp escaped
+  mkdir -p "$(dirname "$CONFIG")"; touch "$CONFIG"
+  escaped="$(printf '%s' "$value" | sed 's/[\"$`]/\\&/g')"
+  tmp="$(mktemp)"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -z "$done" && "$line" =~ ^#?[[:space:]]*$key= ]]; then
+      if [[ -n "$value" ]]; then echo "$key=\"$escaped\""; else echo "#$key=\"\""; fi
+      done=1
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$CONFIG" > "$tmp"
+  if [[ -z "$done" && -n "$value" ]]; then echo "$key=\"$escaped\"" >> "$tmp"; fi
+  cat "$tmp" > "$CONFIG" && rm -f "$tmp"
+  load_settings
+}
+
+# "value  (from …)" for the settings menu
+describe() {  # <env value> <config value> <default>
+  if   [[ -n "$1" ]]; then echo "$1  (environment variable; overrides the config file)"
+  elif [[ -n "$2" ]]; then echo "$2"
+  else echo "$3  (default)"
+  fi
+}
+
+settings() {
+  local choice value
+  while true; do
+    load_settings
+    echo
+    choice="$(pick "Settings" \
+      "Workspace folder:  $(describe "$ENV_ROOT" "$CFG_ROOT" "$DEFAULT_ROOT")" \
+      "Default intent:    $(describe "$ENV_INTENT" "$CFG_INTENT" default)" \
+      "Repo to clone:     $(describe "$ENV_REPO" "$CFG_REPO" "$DEFAULT_REPO")" \
+      "Agents repo:       $(describe "$ENV_AGENTS_REPO" "$CFG_AGENTS_REPO" "$DEFAULT_AGENTS_REPO")" \
+      "Edit the config file" \
+      "Back")"
+    case "$choice" in
+      "Workspace folder"*)
+        value="$(ask "Workspace folder (empty for the default)" "${CFG_ROOT:-}")"
+        value="${value/#\~/$HOME}"
+        if [[ -n "$value" && ! -d "$value" ]]; then
+          read -r -p "$value doesn't exist. Create it? [Y/n] " yn
+          [[ "$yn" =~ ^[Nn] ]] && continue
+          mkdir -p "$value"
+        fi
+        set_config REPOMANCER_ROOT "$value" ;;
+      "Default intent"*)
+        value="$(pick "Default intent" "(none: use 'default')" $(intents | grep -vx default))"
+        [[ -n "$value" ]] || continue
+        [[ "$value" == "(none"* ]] && value=""
+        set_config REPOMANCER_INTENT "$value" ;;
+      "Repo to clone"*|"Agents repo"*)
+        local key=REPOMANCER_REPO current="$CFG_REPO"
+        [[ "$choice" == "Agents repo"* ]] && key=REPOMANCER_AGENTS_REPO current="$CFG_AGENTS_REPO"
+        value="$(ask "Git URL (empty for the default)" "$current")"
+        if [[ -n "$value" ]] && ! GIT_TERMINAL_PROMPT=0 git ls-remote "$value" HEAD >/dev/null 2>&1; then
+          echo "${RED}Can't reach $value with your git credentials; not saved.${RESET}"; continue
+        fi
+        set_config "$key" "$value" ;;
+      "Edit the config file")
+        [[ -f "$CONFIG" ]] || set_config REPOMANCER_ROOT ""
+        "${VISUAL:-${EDITOR:-nano}}" "$CONFIG" ;;
+      *) return 0 ;;
+    esac
+    echo "${GREEN}Saved to $CONFIG${RESET}"
+  done
+}
+
+# --- menus -----------------------------------------------------------------
+NEW_KEY="__new__" SETTINGS_KEY="__settings__"
+
+menu_fzf() {
+  local out key selection
+  while true; do
+    out="$( { printf '%s\t%s\n' "$NEW_KEY" "${GREEN}+ New workspace…${RESET}" \
+                                "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
+              menu_lines; } \
+      | fzf --ansi --reverse --height=~90% --delimiter=$'\t' --with-nth=2.. \
+            --prompt="scry > " --expect=ctrl-w,ctrl-n,ctrl-s \
+            --header="enter: open in new tab · ctrl-w: new window · ctrl-n: new · ctrl-s: settings · esc: quit
+$ROOT" \
+            --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
+            --preview-window=right,50%,wrap )" || return 0
+    key="$(head -1 <<<"$out")"
+    selection="$(sed -n 2p <<<"$out" | cut -f1)"
+    case "$key:$selection" in
+      ctrl-n:*|*:"$NEW_KEY")   new_workspace tab ;;
+      ctrl-s:*|*:"$SETTINGS_KEY") settings ;;
+      ctrl-w:?*)               open_workspace window "$selection" ;;
+      *:?*)                    open_workspace tab "$selection" ;;
+    esac
+  done
+}
+
+menu_plain() {
+  local names=() line n
+  while true; do
+    names=()
+    echo; echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $ROOT${RESET}"
+    while IFS=$'\t' read -r key line; do
+      names+=("$key"); printf '%3d) %s\n' "${#names[@]}" "$line"
+    done < <(menu_lines)
+    (( ${#names[@]} )) || echo "    (none yet)"
+    echo "  n) new workspace   s) settings   q) quit"
+    read -r -p "Open which? (number, or w<number> for a new window): " n || return 0
+    case "$n" in
+      q|Q|"") return 0 ;;
+      n|N) new_workspace tab ;;
+      s|S) settings ;;
+      w[0-9]*) n="${n#w}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace window "${names[$((n - 1))]}" ;;
+      [0-9]*) (( n >= 1 && n <= ${#names[@]} )) && open_workspace tab "${names[$((n - 1))]}" ;;
+      *) echo "?" ;;
+    esac
+  done
+}
+
+case "${1:-}" in
+  --list)    list_plain ;;
+  --preview) preview "${2:?}" ;;
+  -h|--help) sed -n '2,17s/^# \{0,1\}//p' "$0" ;;
+  "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
+  *)         die "unknown option: $1 (see scry --help)" ;;
+esac
