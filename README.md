@@ -67,6 +67,7 @@ The first time `scry` opens a tab, macOS asks whether your terminal may control 
 | What | How it's installed |
 |------|--------------------|
 | Homebrew | official installer, plus `brew shellenv` in `~/.zprofile` |
+| Homebrew update | runs `brew update` first. If an old Homebrew can't update because of leftover shallow `homebrew/core`/`homebrew/cask` copies, it offers to remove them (Homebrew 4+ doesn't need them) |
 | Oh My Zsh | official installer, run so it never replaces an existing `~/.zshrc`. Set to update itself automatically, without the "update now?" question when a terminal opens |
 | git, GitHub CLI, AWS CLI, uv, fzf | `brew install` |
 | Maven | `brew install maven` |

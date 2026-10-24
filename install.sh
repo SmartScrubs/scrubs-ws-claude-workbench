@@ -198,6 +198,49 @@ elif [[ -z "$DRY_RUN" ]]; then
   die "Homebrew install failed"
 fi
 
+# --- Homebrew health -------------------------------------------------------
+# `brew install` tries to update Homebrew first, but carries on with an
+# out-of-date Homebrew when that fails, and then can't find packages for newer
+# macOS ("no bottle available"). The usual cause on older installs: shallow
+# copies of homebrew/core and homebrew/cask, which `brew update` refuses to
+# update. Homebrew 4+ doesn't need those copies, so remove them.
+brew_update() { brew update 2>&1; }
+
+# Remove one of the old tap copies; fall back to unshallowing it.
+fix_shallow_tap() {
+  local tap="$1"
+  brew tap 2>/dev/null | grep -qx "$tap" || return 0
+  run brew untap "$tap" && return 0
+  run brew untap --force "$tap" && return 0
+  warn "couldn't remove $tap; downloading its full history instead (this can take a while)"
+  run git -C "$(brew --repo "$tap")" fetch --unshallow
+}
+
+step "Homebrew update"
+if [[ -n "$DRY_RUN" ]]; then
+  echo "    + brew update"
+elif update_out="$(brew_update)"; then
+  ok "up to date ($(brew --version 2>/dev/null | head -1))"
+elif grep -q "shallow clone" <<<"$update_out"; then
+  warn "Homebrew can't update itself: it still has old shallow copies of homebrew/core"
+  warn "and homebrew/cask, which newer Homebrew doesn't need."
+  if [[ -n "$ASSUME_YES" ]] || confirm "Remove them and update Homebrew? (recommended)"; then
+    fix_shallow_tap homebrew/core || true
+    fix_shallow_tap homebrew/cask || true
+    if update_out="$(brew_update)"; then
+      ok "Homebrew updated ($(brew --version 2>/dev/null | head -1))"
+    else
+      printf '%s\n' "$update_out" | tail -5 | sed 's/^/      /' >&2
+      die "brew update still fails. Fix what it reports above, then re-run this installer."
+    fi
+  else
+    die "Homebrew needs updating first. Run: brew untap homebrew/core homebrew/cask && brew update"
+  fi
+else
+  warn "brew update failed; continuing with Homebrew $(brew --version 2>/dev/null | head -1 | awk '{print $2}'). Its output:"
+  printf '%s\n' "$update_out" | tail -5 | sed 's/^/      /' >&2
+fi
+
 brew_formula() {
   local formula="$1" cmd="$2"
   if command -v "$cmd" >/dev/null 2>&1; then
