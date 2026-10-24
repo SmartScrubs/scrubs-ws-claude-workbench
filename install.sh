@@ -639,6 +639,9 @@ else
 # Repo with one intents/<name>/AGENTS.md per intent
 #REPOMANCER_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
 
+# Update repomancer and scry automatically, at most once an hour (default: yes)
+#REPOMANCER_AUTO_UPDATE="no"
+
 # scry: close the iTerm2 tab or pane when Claude Code exits (default: yes)
 #SCRY_CLOSE_ON_EXIT="no"
 EOF

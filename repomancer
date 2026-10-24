@@ -3,10 +3,13 @@
 #
 # Usage: repomancer <branch-name> [base-branch] [-i|--intent <intent>]
 #        repomancer --list-intents
+#        repomancer --update
 #
 #   base-branch   branch to start from (default: the repo's default branch)
 #   --intent      which AGENTS.md to copy into the new workspace, from the agents
 #                 repo's intents/<intent>/AGENTS.md (case-insensitive)
+#   --update      update repomancer and scry now (they also check by themselves,
+#                 at most once an hour, unless REPOMANCER_AUTO_UPDATE=no)
 #
 # If the workspace folder already exists, repomancer reopens it instead: it resumes the
 # most recent Claude session there, or starts a new one if there isn't one. Its
@@ -22,6 +25,7 @@
 #   REPOMANCER_REPO          repo to clone (default: https://github.com/SmartScrubs/scrubs.git)
 #   REPOMANCER_INTENT        intent to use when --intent isn't given (default: default)
 #   REPOMANCER_AGENTS_REPO   repo with the AGENTS.md files (default: https://github.com/SmartScrubs/agents-md.git)
+#   REPOMANCER_AUTO_UPDATE   update repomancer and scry automatically (default: yes)
 
 # The whole script is one { … } block: bash reads all of it before running
 # anything, so editing or updating this file while it runs can't break it.
@@ -30,12 +34,15 @@ set -euo pipefail
 
 die()  { echo "repomancer: $*" >&2; exit 1; }
 warn() { echo "repomancer: $*" >&2; }
-usage() { sed -n '4,5s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '4,6s/^# \{0,1\}//p' "$0"; }
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 # Environment variables beat the config file, so remember them before reading it.
 ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
 ENV_INTENT="${REPOMANCER_INTENT:-}" ENV_AGENTS_REPO="${REPOMANCER_AGENTS_REPO:-}"
+ENV_AUTO_UPDATE="${REPOMANCER_AUTO_UPDATE:-}"
+# Set when this run is the restart after an update; don't pass it on to Claude.
+JUST_UPDATED="${REPOMANCER_UPDATED:-}"; unset REPOMANCER_UPDATED
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/repomancer/config"
 if [[ -f "$CONFIG" ]]; then
   # shellcheck source=/dev/null
@@ -45,22 +52,83 @@ ROOT="${ENV_ROOT:-${REPOMANCER_ROOT:-$HOME/Documents/AIProjects}}"
 REPO="${ENV_REPO:-${REPOMANCER_REPO:-https://github.com/SmartScrubs/scrubs.git}}"
 CONFIGURED_INTENT="${ENV_INTENT:-${REPOMANCER_INTENT:-}}"
 AGENTS_REPO="${ENV_AGENTS_REPO:-${REPOMANCER_AGENTS_REPO:-https://github.com/SmartScrubs/agents-md.git}}"
-AGENTS_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/repomancer/agents"
+AUTO_UPDATE="$(lower "${ENV_AUTO_UPDATE:-${REPOMANCER_AUTO_UPDATE:-yes}}")"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/repomancer"
+AGENTS_DIR="$CACHE_DIR/agents"
 ROOT="${ROOT/#\~/$HOME}"   # allow REPOMANCER_ROOT=~/... in the config file
 
 # --- arguments -------------------------------------------------------------
-INTENT="" LIST_INTENTS="" ARGS=()
+ORIG_ARGS=("$@") INTENT="" LIST_INTENTS="" UPDATE="" ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -i|--intent)   [[ $# -ge 2 ]] || die "$1 needs a value"; INTENT="$2"; shift 2 ;;
     --intent=*)    INTENT="${1#*=}"; shift ;;
     --list-intents) LIST_INTENTS=1; shift ;;
+    --update)      UPDATE=now; shift ;;
+    --update-if-due) UPDATE=if-due; shift ;;   # used by scry
     -h|--help)     usage; exit 0 ;;
     --)            shift; ARGS+=("$@"); break ;;
     -*)            die "unknown option: $1 (see repomancer --help)" ;;
     *)             ARGS+=("$1"); shift ;;
   esac
 done
+
+# --- updates ---------------------------------------------------------------
+# repomancer and scry run from a clone of the workbench repo, linked into
+# ~/.local/bin. Updating fast-forwards that clone to its upstream branch, and
+# only when that is safe: no local changes and no local commits.
+UPDATE_INTERVAL=3600   # seconds between automatic checks
+
+# The folder this script really lives in, following symlinks.
+self_dir() {
+  local p="$0" t
+  while [[ -L "$p" ]]; do
+    t="$(readlink "$p")"; [[ "$t" == /* ]] || t="$(dirname "$p")/$t"; p="$t"
+  done
+  (cd "$(dirname "$p")" && pwd -P)
+}
+
+# self_update <now|if-due>: prints one line to stdout when it updated, nothing
+# otherwise. "now" also explains on stderr why it didn't; "if-due" is silent
+# and only checks when automatic updates are on and the last check is an
+# hour old.
+self_update() {
+  local mode="$1" dir stamp="$CACHE_DIR/last-update-check" behind
+  say() { [[ "$mode" == if-due ]] || warn "$*"; }
+  if [[ "$mode" == if-due ]]; then
+    case "$AUTO_UPDATE" in no|false|0|off) return 0 ;; esac
+    [[ -z "$JUST_UPDATED" ]] || return 0
+    if [[ -f "$stamp" ]] && (( $(date +%s) - $(stat -f %m "$stamp") < UPDATE_INTERVAL )); then
+      return 0
+    fi
+  fi
+  mkdir -p "$CACHE_DIR"; touch "$stamp"
+  dir="$(self_dir)"
+  if ! git -C "$dir" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
+    say "$dir isn't a git clone on a branch with an upstream; can't update"; return 0
+  fi
+  # Don't let a dead network or an SSH key prompt hold things up.
+  if ! GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes -o ConnectTimeout=5" \
+       git -C "$dir" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 fetch -q >/dev/null 2>&1; then
+    say "couldn't reach $(git -C "$dir" remote get-url origin 2>/dev/null) to check for updates"; return 0
+  fi
+  behind="$(git -C "$dir" rev-list --count 'HEAD..@{upstream}')"
+  if (( behind == 0 )); then
+    say "repomancer and scry are up to date ($(git -C "$dir" log -1 --format=%h))"; return 0
+  fi
+  if [[ -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]]; then
+    say "an update is available, but $dir has local changes; run 'git pull' there"; return 0
+  fi
+  if ! git -C "$dir" merge -q --ff-only '@{upstream}' >/dev/null 2>&1; then
+    say "an update is available, but $dir has local commits; run 'git pull --rebase' there"; return 0
+  fi
+  echo "Updated repomancer and scry to $(git -C "$dir" log -1 --format='%h %s')"
+}
+
+if [[ -n "$UPDATE" ]]; then
+  self_update "$UPDATE"
+  exit 0
+fi
 
 # --- agents repo -----------------------------------------------------------
 # A cached clone of the agents repo, refreshed on every run. If GitHub can't
@@ -101,6 +169,14 @@ BASE="${ARGS[1]:-}"
 
 git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || die "invalid branch name: $BRANCH"
 command -v claude >/dev/null || die "claude CLI not found on PATH"
+
+# Restart with the new version if there is one. The whole script is already
+# in memory, so this run isn't affected by the files changing underneath it.
+UPDATED="$(self_update if-due)"
+if [[ -n "$UPDATED" ]]; then
+  echo "→ $UPDATED"
+  REPOMANCER_UPDATED=1 exec "$0" "${ORIG_ARGS[@]}"
+fi
 
 # Branch names may contain '/', which we don't want as nested directories.
 DIR="$ROOT/${BRANCH//\//-}"

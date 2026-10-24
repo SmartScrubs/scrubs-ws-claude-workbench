@@ -4,6 +4,7 @@
 #
 # Usage: scry              interactive menu (uses fzf when installed)
 #        scry --list       print the workspaces and exit
+#        scry --update     update scry and repomancer now
 #
 # In the menu:
 #   enter    open the workspace in a new iTerm2 tab (resumes its Claude session)
@@ -16,6 +17,9 @@
 # Reads the same settings as repomancer: environment variables, then
 # ~/.config/repomancer/config, then the defaults. Its own setting:
 #   SCRY_CLOSE_ON_EXIT   close the tab/pane when Claude Code exits (default: yes)
+#
+# The list refreshes by itself while the menu is open (with fzf 0.45 or later),
+# and scry restarts itself after updating (see REPOMANCER_AUTO_UPDATE).
 
 # The whole script is one { … } block: bash reads all of it before running
 # anything, so editing or updating this file while it runs can't break it.
@@ -36,7 +40,7 @@ DEFAULT_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
 # Same lookup as repomancer: environment, then config file, then default.
 ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
 ENV_INTENT="${REPOMANCER_INTENT:-}" ENV_AGENTS_REPO="${REPOMANCER_AGENTS_REPO:-}"
-ENV_CLOSE="${SCRY_CLOSE_ON_EXIT:-}"
+ENV_CLOSE="${SCRY_CLOSE_ON_EXIT:-}" ENV_AUTO_UPDATE="${REPOMANCER_AUTO_UPDATE:-}"
 # Read one setting from the config file. A subshell keeps the config from
 # changing this process's (exported) environment, which repomancer inherits.
 cfg_get() {
@@ -50,7 +54,7 @@ cfg_get() {
 load_settings() {
   CFG_ROOT="$(cfg_get REPOMANCER_ROOT)" CFG_REPO="$(cfg_get REPOMANCER_REPO)"
   CFG_INTENT="$(cfg_get REPOMANCER_INTENT)" CFG_AGENTS_REPO="$(cfg_get REPOMANCER_AGENTS_REPO)"
-  CFG_CLOSE="$(cfg_get SCRY_CLOSE_ON_EXIT)"
+  CFG_CLOSE="$(cfg_get SCRY_CLOSE_ON_EXIT)" CFG_AUTO_UPDATE="$(cfg_get REPOMANCER_AUTO_UPDATE)"
   CLOSE_ON_EXIT="$(lower "${ENV_CLOSE:-${CFG_CLOSE:-yes}}")"
   ROOT="${ENV_ROOT:-${CFG_ROOT:-$DEFAULT_ROOT}}"
   ROOT="${ROOT/#\~/$HOME}"
@@ -58,13 +62,27 @@ load_settings() {
 load_settings
 
 HAVE_FZF=""; command -v fzf >/dev/null 2>&1 && HAVE_FZF=1
+
+# The folder this script really lives in, following symlinks. repomancer is
+# next to it, in the same clone of the workbench repo.
+self_dir() {
+  local p="$0" t
+  while [[ -L "$p" ]]; do
+    t="$(readlink "$p")"; [[ "$t" == /* ]] || t="$(dirname "$p")/$t"; p="$t"
+  done
+  (cd "$(dirname "$p")" && pwd -P)
+}
+SELF="$(self_dir)/scry"
+REPOMANCER="$(self_dir)/repomancer"
+[[ -x "$REPOMANCER" ]] || REPOMANCER=repomancer
 BOLD=$'\033[1m' DIM=$'\033[2m' RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m' RESET=$'\033[0m'
 
 # --- workspaces ------------------------------------------------------------
 # "3m", "5h", "2d", "6w"
 ago() {
   local s=$(( $(date +%s) - $1 ))
-  if   (( s < 3600 ));   then echo "$(( s / 60 ))m"
+  if   (( $1 == 0 ));    then echo "-"   # nothing yet, e.g. still cloning
+  elif (( s < 3600 ));   then echo "$(( s / 60 ))m"
   elif (( s < 86400 ));  then echo "$(( s / 3600 ))h"
   elif (( s < 1209600 )); then echo "$(( s / 86400 ))d"
   else echo "$(( s / 604800 ))w"
@@ -146,6 +164,48 @@ preview() {
   git -C "$d" -c color.status=always status -sb 2>/dev/null | head -25
   echo
   git -C "$d" log --color=always --format='%C(yellow)%h%C(reset) %s %C(dim)(%cr)%C(reset)' -10 2>/dev/null
+}
+
+# What makes a row change: workspaces appearing or going away, and their
+# branch or intent (HEAD and config change while a new one is set up).
+signature() {
+  [[ -d "$ROOT" ]] || return 0
+  stat -f '%N %m' "$ROOT"/*/.git "$ROOT"/*/.git/HEAD "$ROOT"/*/.git/config 2>/dev/null || true
+}
+
+# Runs in the background while the fzf menu is open, started by fzf itself
+# (so FZF_PORT is set). It reloads the list when signature() changes, for
+# instance once a workspace started from the menu has been cloned, and exits
+# when that fzf has.
+watch_list() {
+  local last="${SCRY_SIGNATURE:-}" now api="localhost:${FZF_PORT:?}"
+  while sleep 2; do
+    curl -fs -m 2 -H "x-api-key: $FZF_API_KEY" "$api?limit=0" >/dev/null 2>&1 || return 0
+    now="$(signature)"
+    [[ "$now" != "$last" ]] || continue
+    last="$now"
+    curl -fs -m 2 -X POST -H "x-api-key: $FZF_API_KEY" "$api" \
+      -d "reload($(printf %q "$SELF") --entries)" >/dev/null 2>&1 || return 0
+  done
+}
+
+# fzf 0.45 or later has everything watch_list needs (--listen, FZF_PORT, start).
+fzf_can_listen() {
+  local v major minor
+  v="$(fzf --version 2>/dev/null)"; v="${v%% *}"
+  major="${v%%.*}" minor="${v#*.}"; minor="${minor%%.*}"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+  (( major > 0 || minor >= 45 ))
+}
+
+# --- updates ---------------------------------------------------------------
+# Ask repomancer to update the clone both scripts live in (at most once an
+# hour, unless turned off), and restart scry if it did.
+check_updates() {
+  local msg
+  msg="$("$REPOMANCER" --update-if-due 2>/dev/null)" || return 0
+  [[ -n "$msg" ]] || return 0
+  SCRY_STATUS="$msg" exec "$SELF"
 }
 
 # --- iTerm2 ----------------------------------------------------------------
@@ -337,6 +397,8 @@ settings() {
       "Repo to clone:     $(describe "$ENV_REPO" "$CFG_REPO" "$DEFAULT_REPO")" \
       "Agents repo:       $(describe "$ENV_AGENTS_REPO" "$CFG_AGENTS_REPO" "$DEFAULT_AGENTS_REPO")" \
       "Close tab/pane when Claude exits: $(describe "$ENV_CLOSE" "$CFG_CLOSE" yes)" \
+      "Update automatically:             $(describe "$ENV_AUTO_UPDATE" "$CFG_AUTO_UPDATE" yes)" \
+      "Check for updates now" \
       "Edit the config file" \
       "Back")"
     case "$choice" in
@@ -365,6 +427,14 @@ settings() {
         value="$(pick "Close the tab or pane when Claude Code exits?" yes no)"
         [[ -n "$value" ]] || continue
         set_config SCRY_CLOSE_ON_EXIT "$value" ;;
+      "Update automatically"*)
+        value="$(pick "Update repomancer and scry automatically?" yes no)"
+        [[ -n "$value" ]] || continue
+        set_config REPOMANCER_AUTO_UPDATE "$value" ;;
+      "Check for updates now")
+        value="$("$REPOMANCER" --update 2>&1)" || true
+        if [[ "$value" == Updated* ]]; then SCRY_STATUS="$value" exec "$SELF"; fi
+        echo "${value#repomancer: }"; continue ;;
       "Edit the config file")
         [[ -f "$CONFIG" ]] || set_config REPOMANCER_ROOT ""
         "${VISUAL:-${EDITOR:-nano}}" "$CONFIG" ;;
@@ -376,7 +446,8 @@ settings() {
 
 # --- menus -----------------------------------------------------------------
 NEW_KEY="__new__" SETTINGS_KEY="__settings__"
-STATUS=""   # result of the last action, shown at the top of the menu
+STATUS="${SCRY_STATUS:-}"   # result of the last action, shown at the top of the menu
+unset SCRY_STATUS
 
 # Short lines, so the help fits beside the preview pane.
 menu_header() {
@@ -388,13 +459,26 @@ menu_header() {
 
 clear_screen() { clear 2>/dev/null || printf '\033[H\033[2J'; }
 
+# The menu's rows: "New workspace" and "Settings", then the workspaces.
+entries() {
+  printf '%s\t%s\n' "$NEW_KEY" "${GREEN}+ New workspace…${RESET}" \
+                    "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
+  menu_lines
+}
+
 menu_fzf() {
-  local out key selection mode
+  local out key selection mode live=()
+  if fzf_can_listen; then
+    # fzf listens on a random local port; the key keeps other programs out.
+    export FZF_API_KEY
+    FZF_API_KEY="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    live=(--listen --bind "start:execute-silent:$(printf %q "$SELF") --watch </dev/null >/dev/null 2>&1 &")
+  fi
   while true; do
-    out="$( { printf '%s\t%s\n' "$NEW_KEY" "${GREEN}+ New workspace…${RESET}" \
-                                "$SETTINGS_KEY" "${DIM}⚙ Settings…${RESET}"
-              menu_lines; } \
-      | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. \
+    check_updates
+    export SCRY_SIGNATURE; SCRY_SIGNATURE="$(signature)"
+    out="$( entries \
+      | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. ${live[@]+"${live[@]}"} \
             --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-s \
             --header="$(menu_header)" \
             --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
@@ -420,6 +504,7 @@ menu_fzf() {
 menu_plain() {
   local names=() line n
   while true; do
+    check_updates
     names=()
     clear_screen
     echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $(tilde "$ROOT")${RESET}"
@@ -446,7 +531,10 @@ menu_plain() {
 case "${1:-}" in
   --list)    list_plain ;;
   --preview) preview "${2:?}" ;;
-  -h|--help) sed -n '2,17s/^# \{0,1\}//p' "$0" ;;
+  --entries) entries ;;
+  --watch)   watch_list ;;
+  --update)  "$REPOMANCER" --update ;;
+  -h|--help) sed -n '2,22s/^# \{0,1\}//p' "$0" ;;
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac

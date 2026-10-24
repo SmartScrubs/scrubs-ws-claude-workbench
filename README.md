@@ -38,11 +38,12 @@ Claude Code reads `AGENTS.md` when there's no `CLAUDE.md` in the workspace or ab
 
 ## scry: your workspaces at a glance
 
-`scry` lists every workspace in your workspace folder, newest first. For each one it shows the branch, the intent, how long ago you last worked on it, and whether it has uncommitted or unpushed changes. A side panel previews the highlighted workspace's `git status` and recent commits.
+`scry` lists every workspace in your workspace folder, newest first. For each one it shows the branch, the intent, how long ago you last worked on it, and whether it has uncommitted or unpushed changes. A side panel previews the highlighted workspace's `git status` and recent commits. The list updates by itself while it's open, so a workspace you just started shows up as soon as `repomancer` starts cloning it (this needs fzf 0.45 or later).
 
 ```sh
 scry           # interactive menu
 scry --list    # just print the list
+scry --update  # update scry and repomancer now
 ```
 
 | Key | Action |
@@ -52,7 +53,7 @@ scry --list    # just print the list
 | <kbd>⌃V</kbd> | open it in a new iTerm2 pane beside the one `scry` runs in |
 | <kbd>⌃H</kbd> | open it in a new iTerm2 pane below the one `scry` runs in |
 | <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, shows a summary to confirm, then runs `repomancer` in a new tab (<kbd>⌃V</kbd>/<kbd>⌃H</kbd> on **+ New workspace…** start it in a pane instead). <kbd>Esc</kbd> cancels at any step; without fzf, type `q` |
-| <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), or open the config file in your editor |
+| <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), turn automatic updates on or off, check for updates now, or open the config file in your editor |
 | <kbd>Esc</kbd> | quit |
 
 In iTerm2, <kbd>⌃H</kbd> and Backspace are different keys unless you've turned on *Delete key sends ^H* in the profile's Keys settings. With that on, Backspace in `scry` opens a pane instead of deleting a character.
@@ -151,6 +152,7 @@ ln -s "$PWD/repomancer" ~/.local/bin/repomancer
 | `REPOMANCER_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
 | `REPOMANCER_INTENT` | `default` | Intent to use when `--intent` isn't given |
 | `REPOMANCER_AGENTS_REPO` | `https://github.com/SmartScrubs/agents-md.git` | Repo with the `AGENTS.md` files |
+| `REPOMANCER_AUTO_UPDATE` | `yes` | Whether `repomancer` and `scry` [update themselves](#updates) |
 | `SCRY_CLOSE_ON_EXIT` | `yes` | Whether `scry` closes the tab or pane when Claude Code exits |
 
 To change them for good, edit `~/.config/repomancer/config` (the installer creates it with every line commented out):
@@ -164,6 +166,12 @@ For a single run, set an environment variable instead. It overrides the config f
 ```sh
 REPOMANCER_ROOT=~/scratch repomancer try-something
 ```
+
+## Updates
+
+`repomancer` and `scry` run from a clone of this repo (`~/tools/scrubs-ws-claude-workbench` when you installed with the one-liner), linked into `~/.local/bin`. At most once an hour, `repomancer` (when it opens a workspace) and `scry` (each time it shows its menu) fetch that clone. If there's a new version, they fast-forward the clone and restart, and `scry` shows what it updated to. A check that can't reach GitHub waits five seconds at most and is skipped until the next hour.
+
+They only update a clone that can be fast-forwarded: one with no uncommitted changes to tracked files and no commits of its own. Otherwise, `repomancer --update` tells you why and what to run. To update right away, run `repomancer --update` or `scry --update`, or use **Check for updates now** in `scry`'s settings. To turn automatic updates off, set `REPOMANCER_AUTO_UPDATE="no"` in `~/.config/repomancer/config`.
 
 ## Cleaning up
 
