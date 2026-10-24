@@ -548,6 +548,13 @@ else
 
 # Repo repomancer clones (default: https://github.com/SmartScrubs/scrubs.git)
 #REPOMANCER_REPO="https://github.com/SmartScrubs/scrubs.git"
+
+# AGENTS.md intent for new workspaces when --intent isn't given
+# (default: "default"; see: repomancer --list-intents)
+#REPOMANCER_INTENT="feature"
+
+# Repo with one intents/<name>/AGENTS.md per intent
+#REPOMANCER_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
 EOF
   fi
 fi

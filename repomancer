@@ -1,26 +1,38 @@
 #!/usr/bin/env bash
 # repomancer — spin up a fresh clone of the scrubs repo on a new branch and open Claude Code in it.
 #
-# Usage: repomancer <branch-name> [base-branch]
+# Usage: repomancer <branch-name> [base-branch] [-i|--intent <intent>]
+#        repomancer --list-intents
 #
 #   base-branch   branch to start from (default: the repo's default branch)
+#   --intent      which AGENTS.md to copy into the new workspace, from the agents
+#                 repo's intents/<intent>/AGENTS.md (case-insensitive)
 #
 # If the workspace folder already exists, repomancer reopens it instead: it resumes the
-# most recent Claude session there, or starts a new one if there isn't one.
+# most recent Claude session there, or starts a new one if there isn't one. Its
+# AGENTS.md is left as it is.
 #
 # Settings, from highest to lowest priority:
-#   1. environment variables REPOMANCER_ROOT / REPOMANCER_REPO
-#   2. the config file ~/.config/repomancer/config (shell syntax, e.g. REPOMANCER_ROOT="$HOME/code")
-#   3. defaults: REPOMANCER_ROOT=~/Documents/AIProjects, REPOMANCER_REPO=https://github.com/SmartScrubs/scrubs.git
+#   1. command-line options (--intent)
+#   2. environment variables REPOMANCER_*
+#   3. the config file ~/.config/repomancer/config (shell syntax, e.g. REPOMANCER_ROOT="$HOME/code")
+#   4. defaults
 #
-#   REPOMANCER_ROOT   parent directory for workspaces
-#   REPOMANCER_REPO   repo to clone
+#   REPOMANCER_ROOT          parent directory for workspaces (default: ~/Documents/AIProjects)
+#   REPOMANCER_REPO          repo to clone (default: https://github.com/SmartScrubs/scrubs.git)
+#   REPOMANCER_INTENT        intent to use when --intent isn't given (default: default)
+#   REPOMANCER_AGENTS_REPO   repo with the AGENTS.md files (default: https://github.com/SmartScrubs/agents-md.git)
 
 set -euo pipefail
 
-die() { echo "repomancer: $*" >&2; exit 1; }
+die()  { echo "repomancer: $*" >&2; exit 1; }
+warn() { echo "repomancer: $*" >&2; }
+usage() { sed -n '4,5s/^# \{0,1\}//p' "$0"; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# Environment variables beat the config file, so remember them before reading it.
 ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
+ENV_INTENT="${REPOMANCER_INTENT:-}" ENV_AGENTS_REPO="${REPOMANCER_AGENTS_REPO:-}"
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/repomancer/config"
 if [[ -f "$CONFIG" ]]; then
   # shellcheck source=/dev/null
@@ -28,11 +40,61 @@ if [[ -f "$CONFIG" ]]; then
 fi
 ROOT="${ENV_ROOT:-${REPOMANCER_ROOT:-$HOME/Documents/AIProjects}}"
 REPO="${ENV_REPO:-${REPOMANCER_REPO:-https://github.com/SmartScrubs/scrubs.git}}"
+CONFIGURED_INTENT="${ENV_INTENT:-${REPOMANCER_INTENT:-}}"
+AGENTS_REPO="${ENV_AGENTS_REPO:-${REPOMANCER_AGENTS_REPO:-https://github.com/SmartScrubs/agents-md.git}}"
+AGENTS_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/repomancer/agents"
 ROOT="${ROOT/#\~/$HOME}"   # allow REPOMANCER_ROOT=~/... in the config file
 
-[[ $# -ge 1 && $# -le 2 ]] || die "usage: repomancer <branch-name> [base-branch]"
-BRANCH="$1"
-BASE="${2:-}"
+# --- arguments -------------------------------------------------------------
+INTENT="" LIST_INTENTS="" ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i|--intent)   [[ $# -ge 2 ]] || die "$1 needs a value"; INTENT="$2"; shift 2 ;;
+    --intent=*)    INTENT="${1#*=}"; shift ;;
+    --list-intents) LIST_INTENTS=1; shift ;;
+    -h|--help)     usage; exit 0 ;;
+    --)            shift; ARGS+=("$@"); break ;;
+    -*)            die "unknown option: $1 (see repomancer --help)" ;;
+    *)             ARGS+=("$1"); shift ;;
+  esac
+done
+
+# --- agents repo -----------------------------------------------------------
+# A cached clone of the agents repo, refreshed on every run. If GitHub can't
+# be reached, the cached copy is used.
+sync_agents() {
+  # Start over if REPOMANCER_AGENTS_REPO now points somewhere else.
+  if [[ -d "$AGENTS_DIR/.git" && "$(git -C "$AGENTS_DIR" remote get-url origin 2>/dev/null)" != "$AGENTS_REPO" ]]; then
+    rm -rf "$AGENTS_DIR"
+  fi
+  if [[ -d "$AGENTS_DIR/.git" ]]; then
+    GIT_TERMINAL_PROMPT=0 git -C "$AGENTS_DIR" pull -q --ff-only >/dev/null 2>&1 \
+      || warn "couldn't update the AGENTS.md files from $AGENTS_REPO; using the cached copy"
+  else
+    mkdir -p "$(dirname "$AGENTS_DIR")"
+    GIT_TERMINAL_PROMPT=0 git clone -q --depth 1 "$AGENTS_REPO" "$AGENTS_DIR" >/dev/null 2>&1
+  fi
+}
+
+available_intents() {
+  local d
+  for d in "$AGENTS_DIR"/intents/*/; do
+    [[ -f "$d/AGENTS.md" ]] && basename "$d"
+  done
+  return 0
+}
+
+if [[ -n "$LIST_INTENTS" ]]; then
+  sync_agents || die "couldn't download $AGENTS_REPO"
+  echo "Intents in $AGENTS_REPO:"
+  available_intents | sed 's/^/  /'
+  [[ -n "$CONFIGURED_INTENT" ]] && echo "Configured default: $(lower "$CONFIGURED_INTENT")"
+  exit 0
+fi
+
+[[ ${#ARGS[@]} -ge 1 && ${#ARGS[@]} -le 2 ]] || { usage >&2; exit 1; }
+BRANCH="${ARGS[0]}"
+BASE="${ARGS[1]:-}"
 
 git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || die "invalid branch name: $BRANCH"
 command -v claude >/dev/null || die "claude CLI not found on PATH"
@@ -40,11 +102,13 @@ command -v claude >/dev/null || die "claude CLI not found on PATH"
 # Branch names may contain '/', which we don't want as nested directories.
 DIR="$ROOT/${BRANCH//\//-}"
 
+# --- reopen an existing workspace ------------------------------------------
 if [[ -e "$DIR" ]]; then
   [[ -e "$DIR/.git" ]] || die "$DIR exists but is not a git repo"
   cd "$DIR"
   echo "→ Reopening existing workspace $DIR (on branch '$(git branch --show-current)')"
   [[ -n "$BASE" ]] && echo "  (ignoring base branch '$BASE')"
+  [[ -n "$INTENT" ]] && echo "  (ignoring intent '$INTENT': AGENTS.md is only set up in new workspaces)"
   # Claude Code keeps each folder's transcripts in ~/.claude/projects/<path with
   # every non-alphanumeric character replaced by '-'>.
   PROJECT_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
@@ -56,6 +120,29 @@ if [[ -e "$DIR" ]]; then
   exec claude --name "ws+$BRANCH"
 fi
 
+# --- pick the AGENTS.md before cloning, so a typo fails fast ---------------
+# --intent, then REPOMANCER_INTENT (environment or config file), then "default".
+if [[ -n "$INTENT" ]]; then
+  INTENT_SOURCE="--intent"
+elif [[ -n "$CONFIGURED_INTENT" ]]; then
+  INTENT="$CONFIGURED_INTENT" INTENT_SOURCE="REPOMANCER_INTENT"
+else
+  INTENT="default" INTENT_SOURCE="default"
+fi
+INTENT="$(lower "$INTENT")"
+AGENTS_FILE=""
+if sync_agents; then
+  AGENTS_FILE="$AGENTS_DIR/intents/$INTENT/AGENTS.md"
+  if [[ ! -f "$AGENTS_FILE" ]]; then
+    die "unknown intent '$INTENT' (from $INTENT_SOURCE). Available: $(available_intents | tr '\n' ' ')"
+  fi
+elif [[ "$INTENT_SOURCE" == "default" ]]; then
+  warn "couldn't download $AGENTS_REPO; continuing without AGENTS.md"
+else
+  die "couldn't download $AGENTS_REPO for intent '$INTENT'. Check your GitHub access, or leave out the intent"
+fi
+
+# --- clone and branch ------------------------------------------------------
 mkdir -p "$ROOT"
 
 if [[ -n "$BASE" ]]; then
@@ -87,6 +174,21 @@ else
 fi
 git config push.autoSetupRemote true
 git config push.default current
+
+# --- AGENTS.md -------------------------------------------------------------
+# Excluded in this clone only (.git/info/exclude), so it can't be committed by
+# accident and the repo's own .gitignore stays untouched. A tracked AGENTS.md
+# in the repo itself wins.
+if [[ -n "$AGENTS_FILE" ]]; then
+  if git ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+    warn "this repo already has its own AGENTS.md; not replacing it with '$INTENT'"
+  else
+    cp "$AGENTS_FILE" AGENTS.md
+    grep -qxF '/AGENTS.md' .git/info/exclude 2>/dev/null || echo '/AGENTS.md' >> .git/info/exclude
+    git config repomancer.intent "$INTENT"
+    echo "→ Added AGENTS.md for intent '$INTENT'"
+  fi
+fi
 
 echo "→ Opening Claude Code (session: ws+$BRANCH)"
 exec claude --name "ws+$BRANCH"

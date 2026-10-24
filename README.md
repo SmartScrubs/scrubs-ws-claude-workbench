@@ -3,8 +3,10 @@
 `repomancer` gives you a fresh clone of [SmartScrubs/scrubs](https://github.com/SmartScrubs/scrubs) on a new branch, then opens Claude Code in it.
 
 ```sh
-repomancer my-feature        # branch from the repo's default branch (currently `zenbu`)
-repomancer my-feature main   # branch from `main` instead
+repomancer my-feature              # branch from the repo's default branch (currently `zenbu`)
+repomancer my-feature main         # branch from `main` instead
+repomancer my-bug -i debug         # start with the Debug instructions for Claude
+repomancer --list-intents          # show the available intents
 ```
 
 What it does:
@@ -13,9 +15,25 @@ What it does:
 2. Clones the repo into `~/Documents/AIProjects/my-feature`, wherever you run `repomancer` from (a `/` in the branch name becomes `-`, so `feature/x` goes in `feature-x/`). See [Configuration](#configuration) to use a different folder.
 3. Creates the branch from the base branch (the second argument, or the repo's default branch if you leave it out) and switches to it. If the branch already exists on `origin`, it checks that one out instead and ignores the base branch.
 4. Points the branch at `origin/<branch>` and sets `push.autoSetupRemote`, so a plain `git push` works the first time.
-5. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
+5. Copies an `AGENTS.md` for the chosen [intent](#intents) into the workspace, so Claude starts out knowing what kind of work it's there for.
+6. Runs `claude --name "ws+my-feature"`, so the session is easy to find in `/resume` and in the terminal title.
 
-If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch argument is ignored in that case.
+If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` reopens it instead. It resumes the most recent Claude session in that folder (`claude --continue`), or starts a new `ws+my-feature` session if there isn't one. The base branch and intent are ignored in that case, and its `AGENTS.md` is left as it is.
+
+## Intents
+
+Each new workspace gets an `AGENTS.md` from the private [SmartScrubs/agents-md](https://github.com/SmartScrubs/agents-md) repo, which holds one per intent: `analyse`, `debug`, `feature`, `project`, `chores` and `default`. repomancer uses the first of these that's set:
+
+1. `--intent debug` (or `-i debug`) on the command line
+2. `REPOMANCER_INTENT` in `~/.config/repomancer/config`, or as an environment variable
+3. `default`
+
+- **Names:** case-insensitive. An unknown intent stops repomancer before it clones anything, and lists the valid ones.
+- **Updates:** repomancer keeps a copy of the agents repo in `~/.cache/repomancer/agents` and updates it on every run. If GitHub can't be reached, it uses that copy.
+- **Not committed:** the copied `AGENTS.md` is excluded from git in that workspace only (`.git/info/exclude`), so it can't be committed to `scrubs` by accident. If `scrubs` ever gets its own `AGENTS.md`, that one is kept.
+- **Changing them:** edit or add intents in the agents repo, not in a workspace. See its README.
+
+Claude Code reads `AGENTS.md` when there's no `CLAUDE.md` in the workspace or above it.
 
 ## Setup (new Mac)
 
@@ -101,6 +119,8 @@ ln -s "$PWD/repomancer" ~/.local/bin/repomancer
 |-----------|----------------------------------------------|-----------------------------|
 | `REPOMANCER_ROOT` | `~/Documents/AIProjects`                     | Folder where workspaces go  |
 | `REPOMANCER_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
+| `REPOMANCER_INTENT` | `default` | Intent to use when `--intent` isn't given |
+| `REPOMANCER_AGENTS_REPO` | `https://github.com/SmartScrubs/agents-md.git` | Repo with the `AGENTS.md` files |
 
 To change them for good, edit `~/.config/repomancer/config` (the installer creates it with every line commented out):
 
