@@ -56,6 +56,8 @@ scry --list    # just print the list
 
 In iTerm2, <kbd>⌃H</kbd> and Backspace are different keys unless you've turned on *Delete key sends ^H* in the profile's Keys settings. With that on, Backspace in `scry` opens a pane instead of deleting a character.
 
+When Claude Code exits, `scry` closes the tab or pane it opened. If `repomancer` fails, for example on a clone error, the tab stays open so you can read the error. To keep tabs open, turn this off under **⚙ Settings…** or set `SCRY_CLOSE_ON_EXIT="no"` in `~/.config/repomancer/config`. iTerm2 closes a session when its shell exits as long as the profile's *Session → When session ends* setting is left at its default.
+
 The first time `scry` opens a tab, macOS asks whether your terminal may control iTerm2. Allow it. Without fzf, `scry` shows a numbered menu with the same options.
 
 ## Setup (new Mac)
@@ -144,6 +146,7 @@ ln -s "$PWD/repomancer" ~/.local/bin/repomancer
 | `REPOMANCER_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
 | `REPOMANCER_INTENT` | `default` | Intent to use when `--intent` isn't given |
 | `REPOMANCER_AGENTS_REPO` | `https://github.com/SmartScrubs/agents-md.git` | Repo with the `AGENTS.md` files |
+| `SCRY_CLOSE_ON_EXIT` | `yes` | Whether `scry` closes the tab or pane when Claude Code exits |
 
 To change them for good, edit `~/.config/repomancer/config` (the installer creates it with every line commented out):
 

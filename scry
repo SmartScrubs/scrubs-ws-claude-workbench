@@ -14,7 +14,8 @@
 #   esc      quit
 #
 # Reads the same settings as repomancer: environment variables, then
-# ~/.config/repomancer/config, then the defaults.
+# ~/.config/repomancer/config, then the defaults. Its own setting:
+#   SCRY_CLOSE_ON_EXIT   close the tab/pane when Claude Code exits (default: yes)
 
 # The whole script is one { … } block: bash reads all of it before running
 # anything, so editing or updating this file while it runs can't break it.
@@ -35,6 +36,7 @@ DEFAULT_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
 # Same lookup as repomancer: environment, then config file, then default.
 ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
 ENV_INTENT="${REPOMANCER_INTENT:-}" ENV_AGENTS_REPO="${REPOMANCER_AGENTS_REPO:-}"
+ENV_CLOSE="${SCRY_CLOSE_ON_EXIT:-}"
 # Read one setting from the config file. A subshell keeps the config from
 # changing this process's (exported) environment, which repomancer inherits.
 cfg_get() {
@@ -48,6 +50,8 @@ cfg_get() {
 load_settings() {
   CFG_ROOT="$(cfg_get REPOMANCER_ROOT)" CFG_REPO="$(cfg_get REPOMANCER_REPO)"
   CFG_INTENT="$(cfg_get REPOMANCER_INTENT)" CFG_AGENTS_REPO="$(cfg_get REPOMANCER_AGENTS_REPO)"
+  CFG_CLOSE="$(cfg_get SCRY_CLOSE_ON_EXIT)"
+  CLOSE_ON_EXIT="$(lower "${ENV_CLOSE:-${CFG_CLOSE:-yes}}")"
   ROOT="${ENV_ROOT:-${CFG_ROOT:-$DEFAULT_ROOT}}"
   ROOT="${ROOT/#\~/$HOME}"
 }
@@ -192,10 +196,20 @@ repomancer_cmd() {
   echo "$cmd"
 }
 
+# The command typed into a new tab or pane. With SCRY_CLOSE_ON_EXIT (default
+# yes), the shell exits after Claude Code does, so iTerm2 closes the tab or
+# pane. "&&" keeps it open when repomancer fails, so its error stays readable.
+session_cmd() {
+  case "$CLOSE_ON_EXIT" in
+    no|false|0|off) echo "$1" ;;
+    *)              echo "$1 && exit" ;;
+  esac
+}
+
 open_workspace() {  # <tab|vsplit|hsplit> <name>
   local where
   case "$1" in vsplit) where="pane beside this one" ;; hsplit) where="pane below this one" ;; *) where="tab" ;; esac
-  iterm_run "$1" "$(repomancer_cmd "$2")"
+  iterm_run "$1" "$(session_cmd "$(repomancer_cmd "$2")")"
   STATUS="Opened $2 in a new iTerm2 $where."
   echo "$STATUS"
 }
@@ -250,7 +264,7 @@ new_workspace() {  # [tab|vsplit|hsplit]
   intent="$(pick "Intent" "${options[@]}")"
   [[ -n "$intent" ]] || intent="$default_intent"
 
-  iterm_run "$mode" "$(repomancer_cmd "$branch" ${base:+"$base"} --intent "$intent")"
+  iterm_run "$mode" "$(session_cmd "$(repomancer_cmd "$branch" ${base:+"$base"} --intent "$intent")")"
   STATUS="Started $branch ($intent) in a new iTerm2 $mode."
   echo "$STATUS"
 }
@@ -296,6 +310,7 @@ settings() {
       "Default intent:    $(describe "$ENV_INTENT" "$CFG_INTENT" default)" \
       "Repo to clone:     $(describe "$ENV_REPO" "$CFG_REPO" "$DEFAULT_REPO")" \
       "Agents repo:       $(describe "$ENV_AGENTS_REPO" "$CFG_AGENTS_REPO" "$DEFAULT_AGENTS_REPO")" \
+      "Close tab/pane when Claude exits: $(describe "$ENV_CLOSE" "$CFG_CLOSE" yes)" \
       "Edit the config file" \
       "Back")"
     case "$choice" in
@@ -321,6 +336,10 @@ settings() {
           echo "${RED}Can't reach $value with your git credentials; not saved.${RESET}"; continue
         fi
         set_config "$key" "$value" ;;
+      "Close tab/pane"*)
+        value="$(pick "Close the tab or pane when Claude Code exits?" yes no)"
+        [[ -n "$value" ]] || continue
+        set_config SCRY_CLOSE_ON_EXIT "$value" ;;
       "Edit the config file")
         [[ -f "$CONFIG" ]] || set_config REPOMANCER_ROOT ""
         "${VISUAL:-${EDITOR:-nano}}" "$CONFIG" ;;
