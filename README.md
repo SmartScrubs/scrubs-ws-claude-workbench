@@ -76,7 +76,7 @@ The first time `scry` opens a tab, macOS asks whether your terminal may control 
 | Oh My Zsh | official installer, run so it never replaces an existing `~/.zshrc`. Set to update itself automatically, without the "update now?" question when a terminal opens |
 | git, GitHub CLI, AWS CLI, uv, fzf, ffmpeg | `brew install` |
 | Maven | `brew install maven` |
-| Node.js and [puppeteer-core](https://pptr.dev) | `brew install node`, unless Node is already installed (including through nvm), then `npm install -g puppeteer-core`. puppeteer-core doesn't download a browser; it drives an installed one such as Google Chrome, and the installer warns if Chrome is missing |
+| Node.js and [puppeteer-core](https://pptr.dev) | `brew install node`, unless Node is already installed (including through nvm), then `npm install -g puppeteer-core`. A block in `~/.zshrc` points `NODE_PATH` at the global packages folder of whichever `node` is on your `PATH` (also after `nvm use`; your own `NODE_PATH` entries are kept), so `require('puppeteer-core')` works from any script. puppeteer-core doesn't download a browser; it drives an installed one such as Google Chrome, and the installer warns if Chrome is missing |
 | Java 11, 21, 25 | `brew install --cask temurin@<version>`, unless a JDK of that version is already installed |
 | iTerm2, VS Code, Sublime Text | `brew install --cask`, plus the `code` and `subl` commands (linked into `~/.local/bin` if you installed the app by hand) |
 | Markdown preview for Sublime Text | Package Control plus the [MarkdownPreview](https://packagecontrol.io/packages/MarkdownPreview) package, which Package Control installs the next time Sublime starts |

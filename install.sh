@@ -505,6 +505,29 @@ export PATH="$LOCAL_BIN:$PATH"
 add_block "$ZSHRC" "scrubs workbench java" "export JAVA_HOME=\"\$(/usr/libexec/java_home -v $JAVA_DEFAULT 2>/dev/null)\"
 jdk() { export JAVA_HOME=\"\$(/usr/libexec/java_home -v \"\$1\")\" && java -version; }"
 
+# NODE_PATH lets require() find global npm packages such as puppeteer-core.
+# The global folder sits next to whichever node is on PATH (Homebrew or nvm),
+# so it's worked out from that before each prompt, which also follows
+# `nvm use`, without running npm on every prompt. Other NODE_PATH entries stay.
+# (read, not $(cat <<…): bash 3.2 misparses quotes in a heredoc inside $(…))
+IFS= read -r -d '' NODE_BLOCK <<'ZSH' || true
+_workbench_node_path() {
+  local node="${commands[node]:-}" dir
+  [[ -n "$node" ]] || return 0
+  # Not resolving symlinks: Homebrew's bin/node links into its Cellar, but
+  # its global packages are in /opt/homebrew/lib/node_modules.
+  dir="${node:h:h}/lib/node_modules"
+  [[ "$dir" != "${_workbench_node_modules:-}" ]] || return 0
+  local -a parts=("${(@s.:.)NODE_PATH}")
+  parts=("$dir" "${(@)parts:#${_workbench_node_modules:-}}")
+  _workbench_node_modules="$dir"
+  export NODE_PATH="${(j.:.)parts}"
+}
+autoload -Uz add-zsh-hook && add-zsh-hook precmd _workbench_node_path
+_workbench_node_path
+ZSH
+add_block "$ZSHRC" "scrubs workbench node" "${NODE_BLOCK%$'\n'}"
+
 # --- git identity ----------------------------------------------------------
 step "git name and email"
 git_name="$(git config --global user.name 2>/dev/null || true)"
