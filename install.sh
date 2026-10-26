@@ -2,7 +2,8 @@
 # install.sh — set up a Mac for the scrubs Claude Code workbench.
 #
 # Installs (skipping anything already present):
-#   Homebrew, git, GitHub CLI, AWS CLI, uv, Maven, Java 11/21/25 (Temurin),
+#   Homebrew, git, GitHub CLI, AWS CLI, uv, fzf, ffmpeg, Maven, Java 11/21/25 (Temurin),
+#   Node.js and puppeteer-core (npm, global),
 #   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
@@ -388,6 +389,30 @@ for v in "${JAVA_VERSIONS[@]}"; do
     run brew install --cask "temurin@$v"
   fi
 done
+
+step "Node.js and puppeteer-core"
+# An nvm-managed Node only gets on PATH from ~/.zshrc, which this script
+# doesn't read; use it if it's there rather than installing a second Node.
+# nvm is loaded in a subshell because it can exit the shell that loads it.
+NVM_SH="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+if ! command -v npm >/dev/null 2>&1 && [[ -s "$NVM_SH" ]]; then
+  nvm_bin="$( set +eu
+              # shellcheck source=/dev/null
+              source "$NVM_SH" >/dev/null 2>&1 && nvm use default >/dev/null 2>&1
+              dirname "$(command -v npm)" 2>/dev/null )" || true
+  if [[ -x "$nvm_bin/npm" ]]; then
+    PATH="$nvm_bin:$PATH"
+  fi
+fi
+brew_formula node npm
+if npm ls -g puppeteer-core >/dev/null 2>&1; then
+  ok "puppeteer-core already installed ($(npm root -g)/puppeteer-core)"
+else
+  run npm install -g puppeteer-core
+fi
+# puppeteer-core doesn't download a browser; it drives one that's installed.
+[[ -d "/Applications/Google Chrome.app" || -d "$HOME/Applications/Google Chrome.app" ]] \
+  || warn "puppeteer-core needs a browser to drive, such as Google Chrome (brew install --cask google-chrome)"
 
 step "iTerm2, VS Code and Sublime Text"
 brew_cask iterm2 "iTerm.app"
