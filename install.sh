@@ -130,6 +130,78 @@ add_line() {
 [[ -n "$DRY_RUN" ]] && echo "Dry run: nothing will be changed."
 [[ -n "$ASSUME_YES" ]] && echo "Running with --yes: skipping credential setup."
 
+# --- VPN check -------------------------------------------------------------
+# VPNs often block or intercept the downloads below (Homebrew, GitHub,
+# claude.ai), and the install then fails halfway in confusing ways. So ask for
+# the VPN to be turned off first. ALLOW_VPN=1 skips this.
+
+# Tunnel interfaces with an IPv4 address, as "utun8 10.10.11.246". macOS keeps
+# a few utun interfaces for itself, but those only have IPv6 link-local
+# addresses.
+vpn_tunnels() {
+  ifconfig 2>/dev/null | awk '
+    /^[a-z]/ { ifc = $1; sub(/:$/, "", ifc) }
+    $1 == "inet" && ifc ~ /^(utun|ppp|ipsec|tun|tap|gpd)[0-9]/ && $2 !~ /^169\.254\./ { print ifc " " $2 }'
+}
+
+# VPNs that say they're connected: VPNs set up in System Settings, and with
+# --tunnels, Cisco's client (macOS's own list reports it as disconnected even
+# when it isn't, and asking it takes a couple of seconds).
+vpn_connected() {
+  local vpn
+  if [[ "${1:-}" == --tunnels ]]; then
+    for vpn in /opt/cisco/secureclient/bin/vpn /opt/cisco/anyconnect/bin/vpn; do
+      if [[ -x "$vpn" ]] && "$vpn" state 2>/dev/null | grep -q 'state: Connected'; then
+        echo "Cisco Secure Client"; break
+      fi
+    done
+  fi
+  scutil --nc list 2>/dev/null | sed -n 's/^\* (Connected).*"\([^"]*\)".*/\1/p' | sed 's/ *$//'
+}
+
+# VPN apps that are running, to name the likely culprit for a tunnel.
+vpn_apps() {
+  local procs pair
+  procs="$(ps -axco command 2>/dev/null)"
+  for pair in "PanGPA:GlobalProtect" "FortiClient:FortiClient" "Tunnelblick:Tunnelblick" \
+              "openvpn:OpenVPN" "OpenVPN Connect:OpenVPN Connect" "WireGuard:WireGuard" \
+              "Tailscale:Tailscale" "ZscalerTunnel:Zscaler" "NordVPN:NordVPN" \
+              "ExpressVPN:ExpressVPN" "ProtonVPN:Proton VPN" "Mullvad VPN:Mullvad VPN" \
+              "Cisco Secure Client:Cisco Secure Client"; do
+    grep -qxF "${pair%%:*}" <<<"$procs" && echo "${pair#*:}"
+  done
+  return 0
+}
+
+step "VPN"
+if [[ -n "${ALLOW_VPN:-}" ]]; then
+  ok "not checked (ALLOW_VPN is set)"
+else
+  while true; do
+    tunnels="$(vpn_tunnels | paste -sd ',' - | sed 's/,/, /g')"
+    connected="$(vpn_connected ${tunnels:+--tunnels} | sort -u | paste -sd ',' - | sed 's/,/, /g')"
+    if [[ -z "$tunnels$connected" ]]; then
+      ok "no VPN connected"
+      break
+    fi
+    if [[ -n "$connected" ]]; then
+      warn "a VPN is connected: $connected${tunnels:+ ($tunnels)}"
+    else
+      apps="$(vpn_apps | paste -sd ',' - | sed 's/,/, /g')"
+      warn "a VPN seems to be connected ($tunnels)${apps:+, probably $apps}"
+    fi
+    warn "VPNs often block or intercept the downloads this installer needs, so the install fails partway."
+    warn "If you have to stay on the VPN, run the installer with ALLOW_VPN=1 in front."
+    if [[ -n "$DRY_RUN" ]]; then
+      warn "dry run: continuing anyway"
+      break
+    fi
+    [[ -n "$INTERACTIVE" ]] || die "turn off the VPN, then run the installer again"
+    read -r -p "    Turn the VPN off, then press Enter to check again (q to quit): " reply </dev/tty || exit 1
+    [[ "$reply" != [Qq]* ]] || { echo "    Stopped. Run the installer again once the VPN is off."; exit 1; }
+  done
+fi
+
 # --- Network check ---------------------------------------------------------
 # Fail early and clearly if a download host is blocked, rather than halfway
 # through Homebrew. Any HTTP answer counts; only "can't connect" fails.

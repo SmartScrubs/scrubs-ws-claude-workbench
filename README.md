@@ -66,6 +66,8 @@ The first time `scry` opens a tab, macOS asks whether your terminal may control 
 
 `install.sh` sets up everything the workbench needs, then walks you through signing in. It skips anything already installed or signed in, so it's safe to re-run.
 
+**Turn off your VPN first.** VPNs often block or intercept the downloads the installer needs (Homebrew, GitHub, claude.ai), and the install then fails partway. The installer checks before it starts. If a VPN is connected, it names it (e.g. Cisco Secure Client) and waits: turn the VPN off and press Enter to continue, or type `q` to stop. With `--yes` it stops. If you have to stay on the VPN, put `ALLOW_VPN=1` in front of the command to skip the check.
+
 | What | How it's installed |
 |------|--------------------|
 | Apple developer tools | checks that Apple's `git` works. If the selected tools are broken (e.g. an old Intel-only Xcode on an Apple Silicon Mac), offers to switch to the Command Line Tools, or opens their installer |
@@ -114,6 +116,7 @@ Options:
 
 - `--dry-run` prints what it would do without changing anything.
 - `--yes` skips every question, and with it the sign-in steps (useful for re-running just to install updates).
+- `ALLOW_VPN=1` skips the VPN check.
 - `WORKBENCH_DIR` sets where the workbench repo is cloned when the script runs from a URL instead of a checkout. The default is `~/tools/scrubs-ws-claude-workbench`.
 
 At the end it checks every MCP server Claude Code can see (`claude mcp list`) and lists any that need signing in or failed to connect. Sign in to the ones you need from Claude Code with `/mcp`, then open a new terminal.
