@@ -72,7 +72,7 @@ The first time `scry` opens a tab, macOS asks whether your terminal may control 
 | Homebrew | official installer, plus `brew shellenv` in `~/.zprofile`. On Apple Silicon always the native one in `/opt/homebrew`; an Intel Homebrew in `/usr/local` (from an older Mac) is left alone |
 | Homebrew update | runs `brew update` first. If an old Homebrew can't update because of leftover shallow `homebrew/core`/`homebrew/cask` copies, it offers to remove them (Homebrew 4+ doesn't need them), or for older Homebrew downloads their full history |
 | Oh My Zsh | official installer, run so it never replaces an existing `~/.zshrc`. Set to update itself automatically, without the "update now?" question when a terminal opens |
-| git, GitHub CLI, AWS CLI, uv, fzf | `brew install` |
+| git, GitHub CLI, AWS CLI, uv, fzf, ffmpeg | `brew install` |
 | Maven | `brew install maven` |
 | Java 11, 21, 25 | `brew install --cask temurin@<version>`, unless a JDK of that version is already installed |
 | iTerm2, VS Code, Sublime Text | `brew install --cask`, plus the `code` and `subl` commands (linked into `~/.local/bin` if you installed the app by hand) |

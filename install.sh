@@ -299,12 +299,13 @@ brew_cask() {
 }
 
 # --- CLI tools and apps ----------------------------------------------------
-step "git, GitHub CLI, AWS CLI and uv"
+step "git, GitHub CLI, AWS CLI, uv, fzf and ffmpeg"
 brew_formula git git
 brew_formula gh gh
 brew_formula awscli aws
 brew_formula uv uvx   # the AWS MCP server runs via uvx
 brew_formula fzf fzf  # the menu in scry
+brew_formula ffmpeg ffmpeg
 
 step "Maven and Java"
 brew_formula maven mvn
