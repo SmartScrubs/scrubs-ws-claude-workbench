@@ -10,7 +10,7 @@
 #   enter    open the workspace in a new iTerm2 tab (resumes its Claude session)
 #   ctrl-v   open it in a new iTerm2 pane beside the current one
 #   ctrl-h   open it in a new iTerm2 pane below the current one
-#   ctrl-n   new workspace (runs repomancer in a new tab)
+#   ctrl-n   new workspace (asks whether to start it in a new tab or a pane)
 #   ctrl-s   settings
 #   esc      quit
 #
@@ -323,8 +323,23 @@ intents() {
 
 cancelled() { STATUS="Cancelled."; return 0; }
 
+# place_options <tab|vsplit|hsplit> <verb>: one "Yes, <verb> in a new …" line
+# for each place a workspace can open, the given one first, then "No, cancel".
+place_options() {
+  local m
+  echo "Yes, $2 in a new $(where "$1")"
+  for m in tab vsplit hsplit; do
+    [[ "$m" == "$1" ]] || echo "Yes, $2 in a new $(where "$m")"
+  done
+  echo "No, cancel"
+}
+
+choice_mode() {  # an answer from place_options → tab|vsplit|hsplit
+  case "$1" in *beside*) echo vsplit ;; *below*) echo hsplit ;; *) echo tab ;; esac
+}
+
 new_workspace() {  # [tab|vsplit|hsplit]
-  local mode="${1:-tab}" branch base intent default_intent options=() i dir choice
+  local mode="${1:-tab}" branch base intent default_intent options=() places=() i dir choice
   clear_screen; echo "${BOLD}New workspace${RESET}"
   [[ -n "$HAVE_FZF" ]] || echo "${DIM}Type q at any prompt to cancel.${RESET}"
 
@@ -337,8 +352,9 @@ new_workspace() {  # [tab|vsplit|hsplit]
 
   dir="${branch//\//-}"
   if [[ -e "$ROOT/$dir" ]]; then
-    choice="$(pick "$dir already exists. Reopen it?" "Yes, reopen it" "No, cancel")"
-    if [[ "$choice" == Yes* ]]; then open_workspace "$mode" "$dir"; else cancelled; fi
+    while IFS= read -r i; do places+=("$i"); done < <(place_options "$mode" "reopen it")
+    choice="$(pick "$dir already exists. Reopen it?" "${places[@]}")"
+    if [[ "$choice" == Yes* ]]; then open_workspace "$(choice_mode "$choice")" "$dir"; else cancelled; fi
     return 0
   fi
 
@@ -350,8 +366,10 @@ new_workspace() {  # [tab|vsplit|hsplit]
   intent="$(pick "Intent" "${options[@]}")"
   [[ -n "$intent" ]] || { cancelled; return 0; }
 
-  choice="$(pick "Start $branch${base:+ from $base} with intent '$intent'?" "Yes, start it" "No, cancel")"
+  while IFS= read -r i; do places+=("$i"); done < <(place_options "$mode" "start it")
+  choice="$(pick "Start $branch${base:+ from $base} with intent '$intent'?" "${places[@]}")"
   [[ "$choice" == Yes* ]] || { cancelled; return 0; }
+  mode="$(choice_mode "$choice")"
 
   iterm_run "$mode" "$(session_cmd "$(repomancer_cmd "$branch" ${base:+"$base"} --intent "$intent")")"
   STATUS="Started $branch ($intent) in a new iTerm2 $(where "$mode")."
