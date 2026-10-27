@@ -4,6 +4,7 @@
 # Installs (skipping anything already present):
 #   Homebrew, git, GitHub CLI, AWS CLI, uv, fzf, ffmpeg, Maven, Java 11/21/25 (Temurin),
 #   Node.js and puppeteer-core (npm, global),
+#   the explainer video toolchain (headless Chrome, Kokoro text-to-speech; asks first),
 #   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
@@ -52,6 +53,17 @@ PLUGINS=(
   comfy-cloud@comfy-skills
 )
 VSCODE_EXTENSION="anthropic.claude-code"
+# The explainer-video skill's toolchain, at the paths and versions its
+# template pins (see the "Explainer video toolchain" step).
+EXPLAINER_VENV="${EXPLAINER_VENV:-$HOME/.cache/explainer-venv}"
+EXPLAINER_CHROME_DIR="${EXPLAINER_CHROME_DIR:-$HOME/.cache/explainer-chrome}"
+EXPLAINER_PACKAGES=(
+  mlx-audio==0.6.2 "misaki[en]==0.9.4" mlx-whisper==0.4.3 spacy==3.8.17
+  "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+)
+EXPLAINER_BROWSERS="@puppeteer/browsers@2.6.1"
+EXPLAINER_VOICE="mlx-community/Kokoro-82M-bf16"
+EXPLAINER_WHISPER="mlx-community/whisper-large-v3-turbo"
 JAVA_VERSIONS=(11 21 25)
 JAVA_DEFAULT="${JAVA_DEFAULT:-25}"
 
@@ -413,6 +425,87 @@ fi
 # puppeteer-core doesn't download a browser; it drives one that's installed.
 [[ -d "/Applications/Google Chrome.app" || -d "$HOME/Applications/Google Chrome.app" ]] \
   || warn "puppeteer-core needs a browser to drive, such as Google Chrome (brew install --cask google-chrome)"
+
+step "Explainer video toolchain"
+# The explainer-video skill installs all of this itself on first use; doing it
+# here, at the same paths, only makes a dev's first video start faster (the
+# skill skips whatever is already there). Narration uses Apple's MLX, so the
+# voice part is Apple Silicon only.
+# hf_cached <model> — whether a Hugging Face model is already downloaded.
+hf_cached() {
+  "$EXPLAINER_VENV/bin/python" -c 'import sys
+from huggingface_hub import snapshot_download
+snapshot_download(sys.argv[1], local_files_only=True)' "$1" >/dev/null 2>&1
+}
+# hf_fetch <model> — download a Hugging Face model unless it's already there.
+hf_fetch() {
+  if hf_cached "$1"; then
+    ok "$1 already downloaded"
+  else
+    echo "    + download $1 from Hugging Face"
+    [[ -n "$DRY_RUN" ]] || HF_HUB_DISABLE_PROGRESS_BARS=1 "$EXPLAINER_VENV/bin/python" -c 'import sys
+from huggingface_hub import snapshot_download
+snapshot_download(sys.argv[1])' "$1" >/dev/null 2>&1 \
+      || warn "couldn't download $1; it downloads when first used"
+  fi
+}
+explainer_chrome() { find "$EXPLAINER_CHROME_DIR" -name chrome-headless-shell -type f -perm +111 2>/dev/null | head -1; }
+
+if [[ -n "$INTERACTIVE" ]] && ! confirm "Set up the tools for explainer videos? (about 2 GB)"; then
+  ok "skipped (the explainer-video skill installs them when first used)"
+else
+  node_major="$(node -v 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/')" || true
+  [[ "${node_major:-0}" -ge 22 || -n "$DRY_RUN" ]] \
+    || warn "explainer videos need Node.js 22 or later (you have $(node -v 2>/dev/null || echo none))"
+
+  # Headless Chrome, for checking and rendering the Motion Canvas scenes.
+  if chrome="$(explainer_chrome)" && [[ -n "$chrome" ]]; then
+    ok "chrome-headless-shell already installed ($("$chrome" --version 2>/dev/null || echo "$chrome"))"
+  else
+    run npx --yes "$EXPLAINER_BROWSERS" install chrome-headless-shell@stable --path "$EXPLAINER_CHROME_DIR" \
+      || warn "couldn't download chrome-headless-shell; the explainer-video skill will try again"
+  fi
+
+  # Narration: Kokoro text-to-speech on MLX, in a venv at a short path
+  # (espeak-ng can't find its data when the path is long).
+  if [[ "$(uname -m)" != arm64 ]]; then
+    warn "skipping narration: its text-to-speech needs Apple Silicon"
+  else
+    if [[ -x "$EXPLAINER_VENV/bin/python" ]] \
+       && "$EXPLAINER_VENV/bin/python" -c 'import mlx_audio, misaki, mlx_whisper, en_core_web_sm' 2>/dev/null; then
+      ok "narration venv already set up ($EXPLAINER_VENV)"
+    else
+      { [[ -x "$EXPLAINER_VENV/bin/python" ]] || run uv venv -q -p 3.12 "$EXPLAINER_VENV"; } \
+        && run uv pip install -q -p "$EXPLAINER_VENV/bin/python" "${EXPLAINER_PACKAGES[@]}" \
+        || warn "couldn't set up the narration venv; the explainer-video skill will try again"
+    fi
+    hf_fetch "$EXPLAINER_VOICE"
+    # Whisper only checks pronunciation by transcribing the narration back.
+    if hf_cached "$EXPLAINER_WHISPER"; then
+      ok "$EXPLAINER_WHISPER already downloaded"
+    elif [[ -n "$DRY_RUN" ]]; then
+      echo "    + (ask) download $EXPLAINER_WHISPER, default no"
+    elif confirm "Also download Whisper, to check pronunciation? (1.5 GB, optional)" N; then
+      hf_fetch "$EXPLAINER_WHISPER"
+    else
+      ok "skipped Whisper (downloaded when first needed)"
+    fi
+
+    # Smoke test: say something and check a WAV comes out.
+    if [[ -z "$DRY_RUN" ]]; then
+      tts_out="$(mktemp -d)"
+      if "$EXPLAINER_VENV/bin/python" -m mlx_audio.tts.generate --model "$EXPLAINER_VOICE" --voice af_heart \
+           --lang_code a --text "Hello from Kokoro" --join_audio --output_path "$tts_out" \
+           --file_prefix kokoro_test --audio_format wav >/dev/null 2>&1 \
+         && [[ -s "$tts_out/kokoro_test.wav" ]]; then
+        ok "narration works (Kokoro said hello)"
+      else
+        warn "the narration test didn't produce audio; the explainer-video skill will try to repair it"
+      fi
+      rm -rf "$tts_out"
+    fi
+  fi
+fi
 
 step "iTerm2, VS Code and Sublime Text"
 brew_cask iterm2 "iTerm.app"
