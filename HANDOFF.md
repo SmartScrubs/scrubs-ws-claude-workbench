@@ -51,6 +51,10 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   - Self-update: a local bare repo standing in for `origin`.
   - VPN and nvm cases: stub commands on a reduced `PATH`.
   - Failure paths: run a step with `PATH=/usr/bin:/bin`, so `npx`, `uv` and `node` are missing.
+- **Real runs:** run the whole installer in an iTerm2 pane (open one with AppleScript: `split vertically with default profile`, then `write text`).
+  - Read the result back with AppleScript's `contents of session`, which includes the scrollback.
+  - Pick the pane by its text, e.g. it contains `==> VPN`. Make sure you don't match your own Claude Code pane, which shows the same words.
+  - Run the copy in `~/tools/scrubs-ws-claude-workbench` (after `git pull`), not your working checkout: the installer points `repomancer` and `scry` at the checkout it runs from.
 
 ## Things that bit before
 
@@ -62,6 +66,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
 | nvm | Sourcing `nvm.sh` can exit the shell that sources it (e.g. when `NPM_CONFIG_PREFIX` is set), so the installer sources it in a subshell, only to find `npm`. |
 | NODE_PATH | The `.zshrc` block uses `${commands[node]:h:h}/lib/node_modules` without `:A`, because Homebrew's `node` links into its Cellar while global packages live in `/opt/homebrew/lib/node_modules`. A `precmd` hook follows `nvm use`. |
 | `gh` and private repos | A `GITHUB_TOKEN` in someone's shell takes priority over `gh`'s own sign-in, and usually can't read private repos. `gh` then reports "Not Found" even though `git` works. The installer's GitHub step explains this. |
+| Hugging Face models | The model folders in `~/.cache/huggingface/hub/models--…` only hold links and look a few KB in size. The weights are in the shared `~/.cache/huggingface/hub/blobs/`. Check a model with `snapshot_download(…, local_files_only=True)`, as `hf_cached` in `install.sh` does. |
 | Claude plugins | Claude Code only auto-updates Anthropic's marketplaces. For ours, the installer sets `autoUpdate: true` on the marketplace's entry under `extraKnownMarketplaces` in `~/.claude/settings.json`. |
 
 ## Contracts with other repos
@@ -76,8 +81,15 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   - The venv path must stay short: espeak-ng fails when its data path is long.
   - Motion Canvas is frozen at 3.17.2; don't upgrade it. Don't add Remotion: its free license doesn't cover a team our size.
 
+## Verified on a real Mac
+
+These steps have been run in full on an Apple Silicon Mac, not just dry-run:
+- **The VPN check** stopped for Cisco Secure Client, and continued once the VPN was off.
+- **The explainer toolchain**, including Whisper. Whisper correctly transcribed Kokoro's narration with Hugging Face access switched off.
+- **The `video-explainers` plugin** installed from the private marketplace, and auto-update was turned on.
+- **A second full run** changed nothing.
+
 ## Open items
 
-- **The private marketplace install hasn't been seen working.** Running `claude plugin marketplace add SmartScrubs/smartscrubs-ai-skills` from the installer on a fresh Mac is untested. It needs the GitHub sign-in step, which runs earlier, to have set up git access.
-- **Whisper:** its download is offered (default no) but has never been run end to end.
+- **The private marketplace on a fresh Mac:** Claude Code clones it over SSH (`git@github.com:…`). That worked on a Mac with an SSH key for GitHub. A fresh Mac only gets HTTPS access from the installer's `gh auth setup-git`. Nobody has tested whether Claude Code then falls back to HTTPS. If it doesn't, the step warns "could not add marketplace", and the fix is to add an SSH key or install the marketplace from its HTTPS URL.
 - **Intel Macs:** the explainer step skips narration on non-Apple-Silicon Macs. That branch was checked by reading, not run on Intel.
