@@ -40,6 +40,14 @@ Claude Code reads `AGENTS.md` when there's no `CLAUDE.md` in the workspace or ab
 
 `scry` lists every workspace in your workspace folder, newest first. For each one it shows the branch, the intent, how long ago you last worked on it, and whether it has uncommitted or unpushed changes. A side panel previews the highlighted workspace's `git status` and recent commits. The list updates by itself while it's open, so a workspace you just started shows up as soon as `repomancer` starts cloning it (this needs fzf 0.45 or later).
 
+Above the list, `scry` shows the model new Claude Code sessions start with and how much of your Claude plan limits you've used, like `/usage` in Claude Code:
+
+```
+Claude: Fable 5.1 · session 8% · week 27%
+```
+
+A limit turns yellow at 75% and red at 90%, and from 50% it shows when it resets. The model is `ANTHROPIC_MODEL` if set, then the `model` setting in `~/.claude/settings.json`, then the model Claude Code last chose. To get the usage, `scry` asks the same Anthropic endpoint `/usage` uses, signed in with the Claude Code login stored in your Keychain. It checks at most every 3 minutes, and the line refreshes every minute while the menu is open. If Claude Code hasn't run for a while, its login has expired and the usage is left out until you start it again. To turn usage off, use **⚙ Settings…** or set `SCRY_SHOW_USAGE="no"`.
+
 ```sh
 scry           # interactive menu
 scry --list    # just print the list
@@ -53,7 +61,7 @@ scry --update  # update scry and repomancer now
 | <kbd>⌃V</kbd> | open it in a new iTerm2 pane beside the one `scry` runs in |
 | <kbd>⌃H</kbd> | open it in a new iTerm2 pane below the one `scry` runs in |
 | <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, then shows a summary and asks where to run `repomancer`: in a new tab, or in a pane beside or below the one `scry` runs in. The first choice is a new tab, or the pane you picked if you pressed <kbd>⌃V</kbd>/<kbd>⌃H</kbd> on **+ New workspace…**. If the workspace already exists, it offers to reopen it with the same choices. <kbd>Esc</kbd> cancels at any step; without fzf, type `q` |
-| <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), turn automatic updates on or off, check for updates now, or open the config file in your editor |
+| <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), turn automatic updates or the Claude usage on or off, check for updates now, or open the config file in your editor |
 | <kbd>Esc</kbd> | quit |
 
 In iTerm2, <kbd>⌃H</kbd> and Backspace are different keys unless you've turned on *Delete key sends ^H* in the profile's Keys settings. With that on, Backspace in `scry` opens a pane instead of deleting a character.
@@ -160,6 +168,7 @@ ln -s "$PWD/repomancer" ~/.local/bin/repomancer
 | `REPOMANCER_AGENTS_REPO` | `https://github.com/SmartScrubs/agents-md.git` | Repo with the `AGENTS.md` files |
 | `REPOMANCER_AUTO_UPDATE` | `yes` | Whether `repomancer` and `scry` [update themselves](#updates) |
 | `SCRY_CLOSE_ON_EXIT` | `yes` | Whether `scry` closes the tab or pane when Claude Code exits |
+| `SCRY_SHOW_USAGE` | `yes` | Whether `scry` shows how much of your Claude plan limits you've used |
 
 To change them for good, edit `~/.config/repomancer/config` (the installer creates it with every line commented out):
 

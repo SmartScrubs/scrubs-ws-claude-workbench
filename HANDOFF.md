@@ -83,6 +83,10 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   - The skill skips anything it finds there, so the installer's step only saves time on the first video.
   - The venv path must stay short: espeak-ng fails when its data path is long.
   - Motion Canvas is frozen at 3.17.2; don't upgrade it. Don't add Remotion: its free license doesn't cover a team our size.
+- **Claude Code internals that `scry`'s Claude line reads.** None of these are documented, so a Claude Code update can break them. When that happens, the usage or model name is left out quietly instead of failing. Check here first if the line goes missing.
+  - **Usage:** `GET https://api.anthropic.com/api/oauth/usage` with the header `anthropic-beta: oauth-2025-04-20`. It's signed in with the `accessToken` from the Keychain item `Claude Code-credentials` (JSON, under `claudeAiOauth`). `scry` reads `five_hour` and `seven_day` (`utilization`, `resets_at`).
+  - **Model names:** Claude Code's cached model list, `~/.claude/cache/model-catalog/*-cc.json`. `catalog.config.provider_alias_targets` maps aliases such as `fable` to model IDs, `catalog.config.models` gives their names, and `catalog.state.model` is the model Claude Code last chose.
+  - **The token:** it stays inside Python and never goes into a command line, where `ps` would show it. `scry` never refreshes an expired token, because that would get in the way of Claude Code's own refresh; it waits for Claude Code to renew it. The cache, `~/.cache/scry/usage.json`, holds only the percentages and reset times.
 
 ## Verified on a real Mac
 

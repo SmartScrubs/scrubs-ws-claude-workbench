@@ -15,11 +15,14 @@
 #   esc      quit
 #
 # Reads the same settings as repomancer: environment variables, then
-# ~/.config/repomancer/config, then the defaults. Its own setting:
+# ~/.config/repomancer/config, then the defaults. Its own settings:
 #   SCRY_CLOSE_ON_EXIT   close the tab/pane when Claude Code exits (default: yes)
+#   SCRY_SHOW_USAGE      show how much of your Claude plan limits you've used
+#                        (default: yes)
 #
-# The list refreshes by itself while the menu is open (with fzf 0.45 or later),
-# and scry restarts itself after updating (see REPOMANCER_AUTO_UPDATE).
+# The menu also shows the model new Claude Code sessions start with. The list
+# refreshes by itself while the menu is open (with fzf 0.45 or later), and
+# scry restarts itself after updating (see REPOMANCER_AUTO_UPDATE).
 
 # The whole script is one { … } block: bash reads all of it before running
 # anything, so editing or updating this file while it runs can't break it.
@@ -41,6 +44,7 @@ DEFAULT_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
 ENV_ROOT="${REPOMANCER_ROOT:-}" ENV_REPO="${REPOMANCER_REPO:-}"
 ENV_INTENT="${REPOMANCER_INTENT:-}" ENV_AGENTS_REPO="${REPOMANCER_AGENTS_REPO:-}"
 ENV_CLOSE="${SCRY_CLOSE_ON_EXIT:-}" ENV_AUTO_UPDATE="${REPOMANCER_AUTO_UPDATE:-}"
+ENV_USAGE="${SCRY_SHOW_USAGE:-}"
 # Read one setting from the config file. A subshell keeps the config from
 # changing this process's (exported) environment, which repomancer inherits.
 cfg_get() {
@@ -55,7 +59,9 @@ load_settings() {
   CFG_ROOT="$(cfg_get REPOMANCER_ROOT)" CFG_REPO="$(cfg_get REPOMANCER_REPO)"
   CFG_INTENT="$(cfg_get REPOMANCER_INTENT)" CFG_AGENTS_REPO="$(cfg_get REPOMANCER_AGENTS_REPO)"
   CFG_CLOSE="$(cfg_get SCRY_CLOSE_ON_EXIT)" CFG_AUTO_UPDATE="$(cfg_get REPOMANCER_AUTO_UPDATE)"
+  CFG_USAGE="$(cfg_get SCRY_SHOW_USAGE)"
   CLOSE_ON_EXIT="$(lower "${ENV_CLOSE:-${CFG_CLOSE:-yes}}")"
+  SHOW_USAGE="$(lower "${ENV_USAGE:-${CFG_USAGE:-yes}}")"
   ROOT="${ENV_ROOT:-${CFG_ROOT:-$DEFAULT_ROOT}}"
   ROOT="${ROOT/#\~/$HOME}"
 }
@@ -177,12 +183,18 @@ signature() {
 
 # Runs in the background while the fzf menu is open, started by fzf itself
 # (so FZF_PORT is set). It reloads the list when signature() changes, for
-# instance once a workspace started from the menu has been cloned, and exits
-# when that fzf has.
+# instance once a workspace started from the menu has been cloned, refreshes
+# the header (and so the Claude usage) every minute, and exits when that fzf
+# has.
 watch_list() {
-  local last="${SCRY_SIGNATURE:-}" now api="localhost:${FZF_PORT:?}"
+  local last="${SCRY_SIGNATURE:-}" now api="localhost:${FZF_PORT:?}" ticks=0
   while sleep 2; do
     curl -fs -m 2 -H "x-api-key: $FZF_API_KEY" "$api?limit=0" >/dev/null 2>&1 || return 0
+    ticks=$(( ticks + 1 ))
+    if (( ticks % 30 == 0 )); then
+      curl -fs -m 2 -X POST -H "x-api-key: $FZF_API_KEY" "$api" \
+        -d "transform-header:$(printf %q "$SELF") --header" >/dev/null 2>&1 || return 0
+    fi
     now="$(signature)"
     [[ "$now" != "$last" ]] || continue
     last="$now"
@@ -209,6 +221,117 @@ check_updates() {
   msg="$("$REPOMANCER" --update-if-due 2>/dev/null)" || return 0
   [[ -n "$msg" ]] || return 0
   SCRY_STATUS="$msg" exec "$SELF"
+}
+
+# --- Claude ----------------------------------------------------------------
+# claude_info prints "model|session %|session resets|week %|week resets", the
+# usage parts empty when unknown. The model is the one a new Claude Code
+# session starts with: ANTHROPIC_MODEL, then the model setting, then the one
+# Claude Code last chose (from its cached model list, which also gives the
+# name). Usage comes from the endpoint Claude Code's /usage reads, signed in
+# with the login Claude Code keeps in the Keychain; the token never leaves
+# Python. The answer is cached for 3 minutes in ~/.cache/scry/usage.json.
+claude_info() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  SCRY_SHOW_USAGE="$SHOW_USAGE" python3 - 2>/dev/null <<'PY' || true
+import json, os, subprocess, time, urllib.request
+from datetime import datetime
+
+home = os.path.expanduser("~")
+config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude")
+
+def load(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+catalog = {}
+try:
+    d = os.path.join(config, "cache", "model-catalog")
+    files = [os.path.join(d, n) for n in os.listdir(d) if n.endswith("-cc.json")]
+    catalog = load(max(files, key=os.path.getmtime)).get("catalog", {})
+except Exception:
+    pass
+settings = load(os.path.join(config, "settings.json"))
+last = (catalog.get("state") or {}).get("model")
+model = (os.environ.get("ANTHROPIC_MODEL") or (settings.get("env") or {}).get("ANTHROPIC_MODEL")
+         or settings.get("model") or last or "")
+suffix = ""
+if model.endswith("[1m]"):
+    model, suffix = model[:-4], " (1M)"
+if model == "default":
+    model = last or model
+config_ = catalog.get("config") or {}
+model = ((config_.get("provider_alias_targets") or {}).get(model) or {}).get("default", model)
+names = {m.get("id"): m.get("name") for m in config_.get("models") or []}
+name = (names.get(model) or model or "default model") + suffix
+
+def fetch():
+    out = subprocess.run(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                         capture_output=True, text=True, timeout=5).stdout
+    oauth = json.loads(out)["claudeAiOauth"]
+    if oauth.get("expiresAt", 0) / 1000 < time.time():
+        return None  # Claude Code renews it the next time it runs
+    req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
+        "Authorization": "Bearer " + oauth["accessToken"],
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "scry"})
+    with urllib.request.urlopen(req, timeout=3) as r:
+        d = json.load(r)
+    return {k: d.get(k) for k in ("five_hour", "seven_day")}
+
+usage = None
+if os.environ.get("SCRY_SHOW_USAGE") not in ("no", "false", "0", "off"):
+    cache = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache"), "scry", "usage.json")
+    c = load(cache)
+    if time.time() - c.get("fetched", 0) < 180:
+        usage = c.get("usage")
+    else:
+        try:
+            usage = fetch()
+        except Exception:
+            usage = None
+        try:
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with open(cache, "w") as f:
+                json.dump({"fetched": time.time(), "usage": usage}, f)
+        except Exception:
+            pass
+
+def part(key, fmt):
+    u = (usage or {}).get(key) or {}
+    if u.get("utilization") is None:
+        return ["", ""]
+    try:
+        resets = datetime.fromisoformat(u["resets_at"]).astimezone().strftime(fmt)
+    except Exception:
+        resets = ""
+    return [str(int(round(u["utilization"]))), resets]
+
+print("|".join([name] + part("five_hour", "%H:%M") + part("seven_day", "%a %H:%M")))
+PY
+}
+
+# usage_text <label> <percent> <resets>: "session 8%", yellow from 75% and red
+# from 90%, with the reset time once half is used.
+usage_text() {
+  local color=""
+  if (( $2 >= 90 )); then color="$RED"; elif (( $2 >= 75 )); then color="$YELLOW"; fi
+  printf '%s %s%s%%%s' "$1" "$color" "$2" "${color:+$RESET}"
+  if (( $2 >= 50 )) && [[ -n "$3" ]]; then printf ' %s(resets %s)%s' "$DIM" "$3" "$RESET"; fi
+}
+
+# "Claude: Fable 5.1 · session 8% · week 27%"
+claude_line() {
+  local model sp sr wp wr line
+  IFS='|' read -r model sp sr wp wr <<<"$(claude_info)"
+  [[ -n "$model" ]] || return 0
+  line="${DIM}Claude:${RESET} $model"
+  [[ -z "$sp" ]] || line+=" · $(usage_text session "$sp" "$sr")"
+  [[ -z "$wp" ]] || line+=" · $(usage_text week "$wp" "$wr")"
+  echo "$line"
 }
 
 # --- iTerm2 ----------------------------------------------------------------
@@ -419,6 +542,7 @@ settings() {
       "Agents repo:       $(describe "$ENV_AGENTS_REPO" "$CFG_AGENTS_REPO" "$DEFAULT_AGENTS_REPO")" \
       "Close tab/pane when Claude exits: $(describe "$ENV_CLOSE" "$CFG_CLOSE" yes)" \
       "Update automatically:             $(describe "$ENV_AUTO_UPDATE" "$CFG_AUTO_UPDATE" yes)" \
+      "Show Claude usage:                $(describe "$ENV_USAGE" "$CFG_USAGE" yes)" \
       "Check for updates now" \
       "Edit the config file" \
       "Back")"
@@ -452,6 +576,10 @@ settings() {
         value="$(pick "Update repomancer and scry automatically?" yes no)"
         [[ -n "$value" ]] || continue
         set_config REPOMANCER_AUTO_UPDATE "$value" ;;
+      "Show Claude usage"*)
+        value="$(pick "Show how much of your Claude plan limits you've used?" yes no)"
+        [[ -n "$value" ]] || continue
+        set_config SCRY_SHOW_USAGE "$value" ;;
       "Check for updates now")
         value="$("$REPOMANCER" --update 2>&1)" || true
         if [[ "$value" == Updated* ]]; then SCRY_STATUS="$value" exec "$SELF"; fi
@@ -475,6 +603,7 @@ menu_header() {
   echo "enter tab · ^V pane beside · ^H pane below"
   echo "^N new · ^S settings · esc quit"
   echo "${DIM}$(tilde "$ROOT")${RESET}"
+  claude_line
   [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
 }
 
@@ -502,6 +631,7 @@ menu_fzf() {
   while true; do
     check_updates
     export SCRY_SIGNATURE; SCRY_SIGNATURE="$(signature)"
+    export SCRY_MENU_STATUS="$STATUS"   # for --header, when the watcher refreshes it
     out="$( entries \
       | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. ${live[@]+"${live[@]}"} \
             --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-s \
@@ -533,6 +663,7 @@ menu_plain() {
     names=()
     clear_screen
     echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $(tilde "$ROOT")${RESET}"
+    claude_line
     [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
     while IFS=$'\t' read -r key line; do
       names+=("$key"); printf '%3d) %s\n' "${#names[@]}" "$line"
@@ -557,9 +688,10 @@ case "${1:-}" in
   --list)    list_plain ;;
   --preview) preview "${2:?}" ;;
   --entries) entries ;;
+  --header)  STATUS="${SCRY_MENU_STATUS:-}"; menu_header ;;
   --watch)   watch_list ;;
   --update)  "$REPOMANCER" --update ;;
-  -h|--help) sed -n '2,22s/^# \{0,1\}//p' "$0" ;;
+  -h|--help) sed -n '2,25s/^# \{0,1\}//p' "$0" ;;
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac
