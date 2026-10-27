@@ -780,21 +780,38 @@ fi
 
 # --- Claude Code plugins ---------------------------------------------------
 step "Claude Code plugins"
+# can_read_github <owner/repo> — whether git can read a GitHub repo the way
+# Claude Code clones a marketplace: over SSH if that works, otherwise HTTPS
+# (with the sign-in from `gh auth setup-git`). Claude Code picks between the
+# two itself; this only tells "no access" apart from other failures.
+can_read_github() {
+  GIT_TERMINAL_PROMPT=0 git ls-remote "https://github.com/$1.git" HEAD >/dev/null 2>&1 \
+    || GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10" \
+         git ls-remote "git@github.com:$1.git" HEAD >/dev/null 2>&1
+}
+
 if [[ -n "$DRY_RUN" ]] && ! command -v claude >/dev/null 2>&1; then
   warn "claude not installed yet; would add marketplaces and install: ${PLUGINS[*]}"
 else
   marketplaces="$(claude plugin marketplace list 2>/dev/null || true)"
+  missing=" "  # marketplaces that couldn't be added; their plugins are skipped
   for entry in "${MARKETPLACES[@]}"; do
     name="${entry%%=*}" repo="${entry#*=}"
     if grep -qw "$name" <<<"$marketplaces"; then
       ok "marketplace $name already added"
-    else
-      run claude plugin marketplace add "$repo" || warn "could not add marketplace $name"
+    elif ! can_read_github "$repo"; then
+      warn "can't read github.com/$repo, so skipping marketplace $name and its plugins."
+      warn "Sign in with: gh auth login && gh auth setup-git (or ask for access to $repo), then re-run"
+      missing+="$name "
+    elif ! run claude plugin marketplace add "$repo"; then
+      warn "could not add marketplace $name"
+      missing+="$name "
     fi
   done
 
   installed="$(claude plugin list 2>/dev/null || true)"
   for plugin in "${PLUGINS[@]}"; do
+    [[ "$missing" != *" ${plugin#*@} "* ]] || continue
     if grep -qF "$plugin" <<<"$installed"; then
       ok "$plugin already installed"
     else
@@ -805,6 +822,7 @@ else
   # `marketplace add` records each marketplace in ~/.claude/settings.json;
   # Claude Code picks up an autoUpdate flag there the next time it starts.
   for name in "${AUTO_UPDATE_MARKETPLACES[@]}"; do
+    [[ "$missing" != *" $name "* ]] || continue
     if [[ -n "$DRY_RUN" ]]; then
       echo "    + turn on auto-update for $name in ~/.claude/settings.json"
       continue

@@ -68,6 +68,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
 | `gh` and private repos | A `GITHUB_TOKEN` in someone's shell takes priority over `gh`'s own sign-in, and usually can't read private repos. `gh` then reports "Not Found" even though `git` works. The installer's GitHub step explains this. |
 | Hugging Face models | The model folders in `~/.cache/huggingface/hub/models--…` only hold links and look a few KB in size. The weights are in the shared `~/.cache/huggingface/hub/blobs/`. Check a model with `snapshot_download(…, local_files_only=True)`, as `hf_cached` in `install.sh` does. |
 | Claude plugins | Claude Code only auto-updates Anthropic's marketplaces. For ours, the installer sets `autoUpdate: true` on the marketplace's entry under `extraKnownMarketplaces` in `~/.claude/settings.json`. |
+| Private marketplace clones | Claude Code (2.1.x) clones a GitHub marketplace over SSH when SSH to GitHub is set up, otherwise over HTTPS, and retries with the other one if the first fails. Neither can prompt (`GIT_TERMINAL_PROMPT=0`, SSH `BatchMode`). So a fresh Mac without an SSH key works over HTTPS, using the git sign-in from `gh auth setup-git`. Setting `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` forces HTTPS. What fails is having no access at all, so `can_read_github` checks first: without access, the installer warns once with the fix and skips the marketplace's plugins and auto-update. |
 
 ## Contracts with other repos
 
@@ -91,5 +92,5 @@ These steps have been run in full on an Apple Silicon Mac, not just dry-run:
 
 ## Open items
 
-- **The private marketplace on a fresh Mac:** Claude Code clones it over SSH (`git@github.com:…`). That worked on a Mac with an SSH key for GitHub. A fresh Mac only gets HTTPS access from the installer's `gh auth setup-git`. Nobody has tested whether Claude Code then falls back to HTTPS. If it doesn't, the step warns "could not add marketplace", and the fix is to add an SSH key or install the marketplace from its HTTPS URL.
+- **The private marketplace on a fresh Mac:** a Mac without an SSH key hasn't been tried end to end. It should work: Claude Code's clone code uses HTTPS when SSH isn't set up (see "Private marketplace clones" above), and an HTTPS clone with SSH disabled worked using the git sign-in.
 - **Intel Macs:** the explainer step skips narration on non-Apple-Silicon Macs. That branch was checked by reading, not run on Intel.
