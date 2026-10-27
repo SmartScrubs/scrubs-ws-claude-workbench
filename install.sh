@@ -448,10 +448,14 @@ hf_fetch() {
     ok "$1 already downloaded"
   else
     echo "    + download $1 from Hugging Face"
-    [[ -n "$DRY_RUN" ]] || HF_HUB_DISABLE_PROGRESS_BARS=1 "$EXPLAINER_VENV/bin/python" -c 'import sys
+    [[ -n "$DRY_RUN" ]] && return 0
+    if HF_HUB_DISABLE_PROGRESS_BARS=1 "$EXPLAINER_VENV/bin/python" -c 'import sys
 from huggingface_hub import snapshot_download
-snapshot_download(sys.argv[1])' "$1" >/dev/null 2>&1 \
-      || warn "couldn't download $1; it downloads when first used"
+snapshot_download(sys.argv[1])' "$1" >/dev/null 2>&1; then
+      ok "downloaded $1"
+    else
+      warn "couldn't download $1; it downloads when first used"
+    fi
   fi
 }
 explainer_chrome() { find "$EXPLAINER_CHROME_DIR" -name chrome-headless-shell -type f -perm +111 2>/dev/null | head -1; }
