@@ -6,7 +6,7 @@
 #   Node.js and puppeteer-core (npm, global),
 #   the explainer video toolchain (headless Chrome, Kokoro text-to-speech; asks first),
 #   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
-#   Claude Code plugins (sentry, postman, superpowers, comfy-cloud),
+#   Claude Code plugins (sentry, postman, superpowers, comfy-cloud, video-explainers),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `repomancer` and `scry` commands.
 #
@@ -45,13 +45,18 @@ ZSHRC="$HOME/.zshrc"
 MARKETPLACES=(
   claude-plugins-official=anthropics/claude-plugins-official
   comfy-skills=Comfy-Org/comfy-skills
+  smartscrubs-ai-skills=SmartScrubs/smartscrubs-ai-skills
 )
 PLUGINS=(
   sentry@claude-plugins-official
   postman@claude-plugins-official
   superpowers@claude-plugins-official
   comfy-cloud@comfy-skills
+  video-explainers@smartscrubs-ai-skills
 )
+# Claude Code only updates Anthropic's own marketplaces by itself; these get
+# auto-update turned on too, so fixes to our skills reach everyone.
+AUTO_UPDATE_MARKETPLACES=(smartscrubs-ai-skills)
 VSCODE_EXTENSION="anthropic.claude-code"
 # The explainer-video skill's toolchain, at the paths and versions its
 # template pins (see the "Explainer video toolchain" step).
@@ -791,6 +796,36 @@ else
     else
       run claude plugin install "$plugin" --scope user || warn "could not install $plugin"
     fi
+  done
+
+  # `marketplace add` records each marketplace in ~/.claude/settings.json;
+  # Claude Code picks up an autoUpdate flag there the next time it starts.
+  for name in "${AUTO_UPDATE_MARKETPLACES[@]}"; do
+    if [[ -n "$DRY_RUN" ]]; then
+      echo "    + turn on auto-update for $name in ~/.claude/settings.json"
+      continue
+    fi
+    status=0
+    /usr/bin/python3 - "$HOME/.claude/settings.json" "$name" <<'PYEOF' || status=$?
+import json, sys
+path, name = sys.argv[1:]
+try:
+    settings = json.load(open(path))
+    entry = settings["extraKnownMarketplaces"][name]
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit(2)
+if entry.get("autoUpdate") is True:
+    sys.exit(3)
+entry["autoUpdate"] = True
+with open(path, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+PYEOF
+    case "$status" in
+      0) ok "turned on auto-update for $name" ;;
+      3) ok "auto-update already on for $name" ;;
+      *) warn "couldn't turn on auto-update for $name; do it in Claude Code: /plugin → Marketplaces" ;;
+    esac
   done
 fi
 
