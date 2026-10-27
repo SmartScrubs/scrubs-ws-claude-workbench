@@ -75,6 +75,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
 - **`SmartScrubs/scrubs`:** `repomancer` relies on the `install-file` executions in its poms, and on its default branch (currently `zenbu`) when no base branch is given.
 - **`SmartScrubs/agents-md`:** holds one `AGENTS.md` per intent, cached in `~/.cache/repomancer/agents`.
 - **`SmartScrubs/smartscrubs-ai-skills`:** a private Claude Code marketplace. The installer installs its `video-explainers` plugin, which contains the `explainer-video` skill.
+- **Plugins that need tools on the Mac:** `jdtls-lsp` starts a `jdtls` command from `PATH` (Homebrew's `jdtls`, which brings its own JDK). `aws-transform` runs its MCP server with `uvx` and installs AWS's `atx` CLI itself when a transformation first needs it, so the installer doesn't install `atx`.
 - **The explainer toolchain** must match that skill's `scripts/setup.sh`.
   - Same paths: `~/.cache/explainer-venv` and `~/.cache/explainer-chrome`. Both can be changed with `EXPLAINER_VENV` and `EXPLAINER_CHROME_DIR`, which the skill reads too.
   - Same pinned versions, set at the top of `install.sh`. If the skill changes its pins, change them here too.

@@ -3,10 +3,12 @@
 #
 # Installs (skipping anything already present):
 #   Homebrew, git, GitHub CLI, AWS CLI, uv, fzf, ffmpeg, Maven, Java 11/21/25 (Temurin),
+#   jdtls (the Java language server),
 #   Node.js and puppeteer-core (npm, global),
 #   the explainer video toolchain (headless Chrome, Kokoro text-to-speech; asks first),
 #   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
-#   Claude Code plugins (sentry, postman, superpowers, comfy-cloud, video-explainers),
+#   Claude Code plugins (sentry, postman, superpowers, jdtls-lsp, aws-transform, comfy-cloud,
+#   video-explainers),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `repomancer` and `scry` commands.
 #
@@ -51,6 +53,8 @@ PLUGINS=(
   sentry@claude-plugins-official
   postman@claude-plugins-official
   superpowers@claude-plugins-official
+  jdtls-lsp@claude-plugins-official      # Java code intelligence; needs jdtls (Homebrew)
+  aws-transform@claude-plugins-official  # AWS SDK and Java upgrades; installs its atx CLI when first used
   comfy-cloud@comfy-skills
   video-explainers@smartscrubs-ai-skills
 )
@@ -397,8 +401,9 @@ brew_formula uv uvx   # the AWS MCP server runs via uvx
 brew_formula fzf fzf  # the menu in scry
 brew_formula ffmpeg ffmpeg
 
-step "Maven and Java"
+step "Maven, Java and the Java language server"
 brew_formula maven mvn
+brew_formula jdtls jdtls  # started by the jdtls-lsp Claude Code plugin
 for v in "${JAVA_VERSIONS[@]}"; do
   if home="$(/usr/libexec/java_home -F -v "$v" 2>/dev/null)"; then
     ok "Java $v already installed ($home)"
