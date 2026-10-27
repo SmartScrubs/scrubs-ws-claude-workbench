@@ -167,10 +167,12 @@ preview() {
 }
 
 # What makes a row change: workspaces appearing or going away, and their
-# branch or intent (HEAD and config change while a new one is set up).
+# branch or intent (HEAD and config change while a new one is set up). Not the
+# .git folder's own time: git status, which the list itself runs, changes that.
 signature() {
   [[ -d "$ROOT" ]] || return 0
-  stat -f '%N %m' "$ROOT"/*/.git "$ROOT"/*/.git/HEAD "$ROOT"/*/.git/config 2>/dev/null || true
+  ls -d "$ROOT"/*/.git 2>/dev/null || true
+  stat -f '%N %m' "$ROOT"/*/.git/HEAD "$ROOT"/*/.git/config 2>/dev/null || true
 }
 
 # Runs in the background while the fzf menu is open, started by fzf itself
@@ -184,8 +186,9 @@ watch_list() {
     now="$(signature)"
     [[ "$now" != "$last" ]] || continue
     last="$now"
+    # reload-sync keeps the old rows on screen until the new ones are ready.
     curl -fs -m 2 -X POST -H "x-api-key: $FZF_API_KEY" "$api" \
-      -d "reload($(printf %q "$SELF") --entries)" >/dev/null 2>&1 || return 0
+      -d "reload-sync($(printf %q "$SELF") --entries)" >/dev/null 2>&1 || return 0
   done
 }
 
@@ -473,6 +476,10 @@ menu_fzf() {
     export FZF_API_KEY
     FZF_API_KEY="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     live=(--listen --bind "start:execute-silent:$(printf %q "$SELF") --watch </dev/null >/dev/null 2>&1 &")
+    # Keep the cursor on the same workspace when the list reloads (fzf 0.66+).
+    if fzf --track --id-nth=1 --filter=x </dev/null >/dev/null 2>&1 || (( $? == 1 )); then
+      live+=(--track --id-nth=1)
+    fi
   fi
   while true; do
     check_updates
