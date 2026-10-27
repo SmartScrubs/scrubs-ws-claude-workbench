@@ -374,6 +374,11 @@ else
   printf '%s\n' "$update_out" | tail -5 | sed 's/^/      /' >&2
 fi
 
+# Homebrew 7 asks "Do you want to proceed with the installation?" in a
+# terminal before installing anything with dependencies, which stalls the
+# installer mid-step. Older Homebrew ignores this variable.
+export HOMEBREW_NO_ASK=1
+
 brew_formula() {
   local formula="$1" cmd="$2"
   if command -v "$cmd" >/dev/null 2>&1; then
