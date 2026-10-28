@@ -51,6 +51,7 @@ A limit turns yellow at 75% and red at 90%, and from 50% it shows when it resets
 ```sh
 scry           # interactive menu
 scry --list    # just print the list
+scry --arrange # arrange the panes in this iTerm2 tab (see ⌃L)
 scry --update  # update scry and repomancer now
 ```
 
@@ -62,6 +63,7 @@ scry --update  # update scry and repomancer now
 | <kbd>⌃H</kbd> | open it in a new iTerm2 pane below the one `scry` runs in |
 | <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, then shows a summary and asks where to run `repomancer`: in a new tab, or in a pane beside or below the one `scry` runs in. The first choice is a new tab, or the pane you picked if you pressed <kbd>⌃V</kbd>/<kbd>⌃H</kbd> on **+ New workspace…**. If the workspace already exists, it offers to reopen it with the same choices. <kbd>Esc</kbd> cancels at any step; without fzf, type `q` |
 | <kbd>⌃D</kbd> | delete the workspace. If everything in it is committed and pushed, `scry` asks first, with "No, cancel" as the first choice. If it has uncommitted changes, unpushed commits or stashes, `scry` lists them and you type the workspace's name to delete it. The folder goes to the Trash, so you can still get it back. If the workspace's branch is on GitHub, `scry` can also delete it there, but only if no pull request was ever opened from it, or one was merged and nothing was pushed or committed after it. Then `scry` asks, with "No, keep it on GitHub" as the first choice. Otherwise it keeps the branch and says why: an open pull request, one closed without merging, commits after the merge, or that it couldn't check (it needs `gh`). It never deletes the repo's default branch, `main` or `master`, or a branch someone pushed to after `scry` checked it. If deleting the branch fails, the folder stays too, so you can try again. `scry` won't delete a workspace while something is still running in it, such as Claude Code or a shell in its tab. Without fzf, type `d` and the number |
+| <kbd>⌃L</kbd> | arrange the panes in the tab `scry` runs in. `scry` gets a narrow column on the left, about 72 characters wide and at most a third of the window. The other panes fill an even grid beside it, row by row: the workspaces first, sorted by name, then anything else, such as a plain shell. The grid's shape depends on the window, so each pane gets as much room as it can. The panes keep running; only their places and sizes change. Other tabs and windows aren't touched. While it works, the window briefly resizes and then returns to its size. This uses functions iTerm2 hasn't documented (it works in iTerm2 3.7.6); if your iTerm2 doesn't have them, `scry` says so. Without fzf, type `l` |
 | <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), turn automatic updates or the Claude usage on or off, check for updates now, or open the config file in your editor |
 | <kbd>Esc</kbd> | quit |
 

@@ -8,7 +8,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
 |---|---|
 | `install.sh` | The interactive installer for a new Mac, usually run with the one-liner in the README. Each `step` installs one thing and skips it if it's already there, so it's safe to run again. |
 | `repomancer` | Clones `SmartScrubs/scrubs` into `<root>/<branch>`, creates the branch, installs the bundled Maven jars, copies an intent `AGENTS.md` from `SmartScrubs/agents-md`, and starts Claude Code as `ws+<branch>`. |
-| `scry` | An fzf menu of the workspaces that opens them in iTerm2 tabs or panes, or moves them to the Trash, with a plain menu when fzf is missing. |
+| `scry` | An fzf menu of the workspaces that opens them in iTerm2 tabs or panes, arranges the panes of its own tab into a grid, or moves workspaces to the Trash. It has a plain menu for when fzf is missing. |
 
 ## How a change reaches people
 
@@ -54,6 +54,10 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   - Deleting a workspace that's in use: start `sleep 600` from inside the workspace folder.
   - VPN and nvm cases: stub commands on a reduced `PATH`.
   - Failure paths: run a step with `PATH=/usr/bin:/bin`, so `npx`, `uv` and `node` are missing.
+- **iTerm2 panes (scry's arrange):** open a throwaway window with AppleScript and split it. Then `write text` a `cd` into a fake workspace in each pane, and `scry --arrange` into one of them. Read each pane's `columns` and `rows` back.
+  - To press a key in fzf there, `write text (character id 12) newline no` (that's <kbd>⌃L</kbd>; 27 is Esc).
+  - Clean up by typing `exit` into each pane, at least 5 s after it opened. AppleScript `close` on a window with several panes asks the person at the Mac to confirm. A session that ends within a few seconds of starting makes iTerm2 show a "session ended very soon after starting" warning.
+  - Never run `scry --arrange` from your own terminal: it rearranges the tab it runs in.
 - **Real runs:** run the whole installer in an iTerm2 pane (open one with AppleScript: `split vertically with default profile`, then `write text`).
   - Read the result back with AppleScript's `contents of session`, which includes the scrollback.
   - Pick the pane by its text, e.g. it contains `==> VPN`. Make sure you don't match your own Claude Code pane, which shows the same words.
@@ -92,6 +96,13 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   - **Model names:** Claude Code's cached model list, `~/.claude/cache/model-catalog/*-cc.json`. `catalog.config.provider_alias_targets` maps aliases such as `fable` to model IDs, `catalog.config.models` gives their names, and `catalog.state.model` is the model Claude Code last chose.
   - **The token:** it stays inside Python and never goes into a command line, where `ps` would show it. `scry` never refreshes an expired token, because that would get in the way of Claude Code's own refresh; it waits for Claude Code to renew it. The cache, `~/.cache/scry/usage.json`, holds only the percentages and reset times.
 
+- **iTerm2's layout functions that `scry`'s arrange uses.** iTerm2 3.7.6 has them, but they're undocumented. They were found by reading the app's strings and probing them through AppleScript's `invoke API expression`, whose errors name the expected arguments and fields.
+  - `iterm2.apply_layout(spec_json_b64:)` takes base64 JSON: `{"tabs":[{"tab_id":…,"root":NODE}]}`. A NODE is either `{"session_id":GUID}` or `{"vertical":bool,"children":[NODE,…]}`. A splitter needs at least 2 children, and can't sit directly inside one of the same direction. Every pane of the tab must appear exactly once. Unknown fields are ignored silently.
+  - It splits evenly; no size field could be found. So `scry` then narrows its own pane: it sets `columns` (which resizes the window), puts the window's `bounds` back, and corrects by what's left over, up to 5 times with 0.4 s for each resize to settle. It ends at 72 columns, now and then 2–3 short.
+  - A tab's id for `tab_id` is the session variable `tab.id`. scry's own session is the GUID after the `:` in `ITERM_SESSION_ID`.
+  - Also there, unused: `iterm2.move_session(session:destination:vertical:before:)`, `iterm2.move_session_to_new_tab(session:tab_index:window_id:)`, `iterm2.move_session_to_new_window(session:)`.
+  - AppleScript traps: inside `tell application "iTerm"`, `tab` is iTerm's tab class, not a tab character (use `character id 9`), and `contents` is a session's text. `before` is a reserved word.
+
 ## Verified on a real Mac
 
 These steps have been run in full on an Apple Silicon Mac, not just dry-run:
@@ -104,4 +115,5 @@ These steps have been run in full on an Apple Silicon Mac, not just dry-run:
 
 - **The private marketplace on a fresh Mac:** a Mac without an SSH key hasn't been tried end to end. It should work: Claude Code's clone code uses HTTPS when SSH isn't set up (see "Private marketplace clones" above), and an HTTPS clone with SSH disabled worked using the git sign-in.
 - **scry deleting branches on GitHub:** the pull request rules were tested with a stub `gh` returning made-up pull requests, and the deletes against a local bare repo standing in for GitHub. The real `gh pr list` output, in particular `headRefOid` for merged and squash-merged pull requests, hasn't been checked against `SmartScrubs/scrubs`, because `gh` on the test Mac couldn't see that repo.
+- **scry's arrange in other windows:** it has only been tried in an ordinary iTerm2 window. Not yet tried: a native full-screen or maximized window, where the window can't resize; a tab with a floating pane, which `apply_layout` refuses; and iTerm2 versions older than 3.7.6.
 - **Intel Macs:** the explainer step skips narration on non-Apple-Silicon Macs. That branch was checked by reading, not run on Intel.

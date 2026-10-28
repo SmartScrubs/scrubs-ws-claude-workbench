@@ -4,6 +4,7 @@
 #
 # Usage: scry              interactive menu (uses fzf when installed)
 #        scry --list       print the workspaces and exit
+#        scry --arrange    arrange the panes in this iTerm2 tab, then exit
 #        scry --update     update scry and repomancer now
 #
 # In the menu:
@@ -14,6 +15,8 @@
 #   ctrl-d   delete the workspace (asks first; offers to delete its branch on
 #            GitHub too when no pull request is open or unmerged; the folder
 #            goes to the Trash)
+#   ctrl-l   arrange this tab's panes: scry in a narrow column on the left,
+#            the workspaces in a grid beside it
 #   ctrl-s   settings
 #   esc      quit
 #
@@ -405,6 +408,193 @@ open_workspace() {  # <tab|vsplit|hsplit> <name>
   echo "$STATUS"
 }
 
+# --- arranging panes -------------------------------------------------------
+# arrange_panes lays out the tab scry runs in: scry in a narrow column on the
+# left, then the other panes in an even grid, row by row: the workspaces
+# (sorted by name) first, then anything else, such as a plain shell. The
+# panes keep running; only their places and sizes change.
+#
+# It uses an undocumented iTerm2 function (see HANDOFF.md): apply_layout
+# takes the new split tree as base64 JSON, but always splits evenly, so scry's
+# column is narrowed afterwards: set its width (which shrinks the window),
+# put the window back to its old size (which widens every pane, scry's a
+# little), and repeat, correcting by what's left over, until it's close.
+SCRY_COLUMNS=72
+
+# The tab's id and window size, then one line per pane in it:
+#   tab<TAB>id<TAB>width px<TAB>height px
+#   <session id><TAB><tty>
+iterm_tab_panes() {  # <scry's session id>
+  osascript - "$1" <<'APPLESCRIPT'
+on run argv
+  set me_ to item 1 of argv
+  set out to ""
+  set TAB_ to character id 9   -- inside "tell iTerm", tab means a tab
+  tell application "iTerm"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with i from 1 to (count of sessions of t)
+          if unique ID of (session i of t) is me_ then
+            set b to bounds of w
+            set out to "tab" & TAB_ & (variable (session i of t) named "tab.id") & TAB_ & ¬
+              ((item 3 of b) - (item 1 of b)) & TAB_ & ((item 4 of b) - (item 2 of b)) & linefeed
+            repeat with j from 1 to (count of sessions of t)
+              set out to out & (unique ID of (session j of t)) & TAB_ & (tty of (session j of t)) & linefeed
+            end repeat
+            return out
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  return out
+end run
+APPLESCRIPT
+}
+
+# The workspace each terminal is working in: "<tty><TAB><workspace>" for
+# every tty with a process whose working folder is in a workspace.
+tty_workspaces() {
+  local root
+  root="$(cd "$ROOT" 2>/dev/null && pwd -P)" || return 0
+  { ps -A -o pid=,tty= | awk '{ print "t", $1, $2 }'
+    /usr/sbin/lsof -nP -d cwd -Fpn 2>/dev/null | awk '/^p/ { p = substr($0, 2) } /^n/ { print "c", p, substr($0, 2) }'
+  } | awk -v root="$root/" '
+    $1 == "t" { tty[$2] = "/dev/" $3 }
+    $1 == "c" && index($3, root) == 1 { w = substr($3, length(root) + 1); sub(/\/.*/, "", w); if (w != "") cwd[$2] = w }
+    END { for (p in cwd) if (tty[p] != "/dev/??") print tty[p] "\t" cwd[p] }' | sort -u
+}
+
+# grid_columns <panes> <width px> <height px>: how many panes per row. Picks
+# the shape whose smallest pane fits the largest 100x40 terminal (a size that
+# suits Claude Code), counting a character as about half as wide as a line is
+# tall; ties go to fewer columns.
+grid_columns() {
+  local n="$1" w="$2" h="$3" c r score best=0 best_c=1
+  for (( c = 1; c <= n; c++ )); do
+    r=$(( (n + c - 1) / c ))
+    score=$(( w * 1000 / (c * 45) )); (( h * 1000 / (r * 40) < score )) && score=$(( h * 1000 / (r * 40) ))
+    if (( score > best )); then best=$score best_c=$c; fi
+  done
+  echo "$best_c"
+}
+
+# layout_json <tab id> <scry's session id> <columns> <session id>...: the
+# apply_layout spec. iTerm2 rejects a splitter inside one of the same
+# direction, so a single row joins scry's splitter instead of nesting.
+layout_json() {
+  local tab="$1" me="$2" c="$3" rows=() i=0 id grid
+  shift 3
+  leaf() { printf '{"session_id":"%s"}' "$1"; }
+  splitter() {  # <vertical true|false> <child json>...: one child stays as it is
+    local v="$1"; shift
+    if (( $# == 1 )); then printf '%s' "$1"; return; fi
+    printf '{"vertical":%s,"children":[%s]}' "$v" "$(IFS=,; echo "$*")"
+  }
+  local cells=()
+  for id in "$@"; do
+    cells+=("$(leaf "$id")"); i=$(( i + 1 ))
+    if (( i % c == 0 || i == $# )); then rows+=("$(splitter true "${cells[@]}")"); cells=(); fi
+  done
+  if (( ${#rows[@]} == 1 )); then
+    # One row: its panes sit beside scry in the same splitter.
+    local flat=("$(leaf "$me")"); for id in "$@"; do flat+=("$(leaf "$id")"); done
+    grid="$(splitter true "${flat[@]}")"
+  else
+    grid="$(splitter true "$(leaf "$me")" "$(splitter false "${rows[@]}")")"
+  fi
+  printf '{"tabs":[{"tab_id":"%s","root":%s}]}' "$tab" "$grid"
+}
+
+# Apply the spec, then narrow scry's pane to <columns>, but to no less than a
+# third of the window: scry's splitter has <splitter children> even parts.
+# Prints an error, if any.
+iterm_apply_layout() {  # <spec base64> <scry's session id> <columns> <splitter children>
+  osascript - "$1" "$2" "$3" "$4" <<'APPLESCRIPT'
+on run argv
+  set spec to item 1 of argv
+  set me_ to item 2 of argv
+  set target to (item 3 of argv) as integer
+  set parts to (item 4 of argv) as integer
+  tell application "iTerm"
+    try
+      invoke API expression "iterm2.apply_layout(spec_json_b64: \"" & spec & "\")"
+    on error e
+      return e
+    end try
+    delay 0.3
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with i from 1 to (count of sessions of t)
+          if unique ID of (session i of t) is me_ then
+            set s to session i of t
+            set b to bounds of w
+            set cols to columns of s
+            if target > (cols * parts) div 3 then set target to (cols * parts) div 3
+            if target < cols then
+              set x to target
+              repeat 5 times
+                try
+                  set columns of s to x
+                  set bounds of w to b
+                end try
+                delay 0.4   -- less, and the resize hasn't settled yet
+                set cols to columns of s
+                if cols - target ≤ 1 and target - cols ≤ 1 then exit repeat
+                set x to x + target - cols
+                if x < 20 then exit repeat
+              end repeat
+            end if
+            return ""
+          end if
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  return ""
+end run
+APPLESCRIPT
+}
+
+plural() { if (( $1 == 1 )); then echo "1 $2"; else echo "$1 $2s"; fi; }  # <n> <noun>
+
+arrange_panes() {
+  local me="${ITERM_SESSION_ID#*:}" key tab="" w=0 h=0 id tty ws ids=() others=() names=() c parts out
+  if [[ -z "${ITERM_SESSION_ID:-}" || "$me" == "${ITERM_SESSION_ID:-}" ]]; then
+    STATUS="Arranging panes only works when scry runs in iTerm2."; return 0
+  fi
+  out="$(iterm_tab_panes "$me" 2>&1)" || { STATUS="Couldn't read the panes from iTerm2."; return 0; }
+  local map; map="$(tty_workspaces)"
+  while IFS=$'\t' read -r key id tty ws; do
+    if [[ "$key" == tab ]]; then tab="$id" w="$tty" h="$ws"; continue; fi
+    tty="$id" id="$key"   # a pane's line is "<session id><TAB><tty>"
+    [[ -n "$id" && "$id" != "$me" ]] || continue
+    ws="$(awk -F'\t' -v t="$tty" '$1 == t { print $2; exit }' <<<"$map")"
+    if [[ -n "$ws" ]]; then names+=("$ws"$'\t'"$id"); else others+=("$id"); fi
+  done <<<"$out"
+  [[ -n "$tab" ]] || { STATUS="Couldn't find scry's pane in iTerm2."; return 0; }
+  if (( ${#names[@]} )); then
+    while IFS=$'\t' read -r ws id; do ids+=("$id"); done < <(printf '%s\n' "${names[@]}" | sort)
+  fi
+  ids+=(${others[@]+"${others[@]}"})
+  (( ${#ids[@]} )) || { STATUS="Nothing to arrange: scry is the only pane in this tab."; return 0; }
+
+  c="$(grid_columns "${#ids[@]}" $(( w * 3 / 4 )) "$h")"
+  # scry's splitter holds scry and the rows, or scry and one row's panes.
+  parts=2; (( c < ${#ids[@]} )) || parts=$(( ${#ids[@]} + 1 ))
+  out="$(iterm_apply_layout "$(layout_json "$tab" "$me" "$c" "${ids[@]}" | base64 | tr -d '\n')" \
+           "$me" "$SCRY_COLUMNS" "$parts" 2>&1)" || true
+  if [[ "$out" == *"No function registered"* ]]; then
+    STATUS="This iTerm2 can't arrange panes; update iTerm2 (3.7.6 works)."
+  elif [[ -n "$out" ]]; then
+    STATUS="Couldn't arrange the panes: $out"
+  else
+    STATUS="Arranged $(plural ${#names[@]} workspace)"
+    (( ${#others[@]} == 0 )) || STATUS+=" and $(plural ${#others[@]} "other pane")"
+    STATUS+=" beside scry."
+  fi
+}
+
 # --- prompts ---------------------------------------------------------------
 # input "Prompt" [default] [hint] → prints the text typed. Fails (status 1)
 # when cancelled: Esc with fzf (a one-line fzf with no list is a text box;
@@ -739,7 +929,8 @@ unset SCRY_STATUS
 # Short lines, so the help fits beside the preview pane.
 menu_header() {
   echo "enter tab · ^V pane beside · ^H pane below"
-  echo "^N new · ^D delete · ^S settings · esc quit"
+  echo "^N new · ^D delete · ^L arrange panes"
+  echo "^S settings · esc quit"
   echo "${DIM}$(tilde "$ROOT")${RESET}"
   claude_line
   [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
@@ -772,18 +963,19 @@ menu_fzf() {
     export SCRY_MENU_STATUS="$STATUS"   # for --header, when the watcher refreshes it
     out="$( entries \
       | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. ${live[@]+"${live[@]}"} \
-            --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-d,ctrl-s \
+            --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-d,ctrl-l,ctrl-s \
             --header="$(menu_header)" \
             --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
             --preview-window='right,50%,<70(down,50%)' )" || return 0
     key="$(head -1 <<<"$out")"
     selection="$(sed -n 2p <<<"$out" | cut -f1)"
-    # ctrl-n / ctrl-s act wherever the cursor is, ctrl-d only on a workspace;
+    # ctrl-n / ctrl-l / ctrl-s act wherever the cursor is, ctrl-d only on a workspace;
     # otherwise the row decides, and ctrl-v / ctrl-h choose where it opens.
     case "$key" in ctrl-v) mode=vsplit ;; ctrl-h) mode=hsplit ;; *) mode=tab ;; esac
     case "$key" in
       ctrl-n) new_workspace tab ;;
       ctrl-s) settings ;;
+      ctrl-l) arrange_panes ;;
       ctrl-d) case "$selection" in
                 ""|"$NEW_KEY"|"$SETTINGS_KEY") ;;
                 *) delete_workspace "$selection" ;;
@@ -811,12 +1003,13 @@ menu_plain() {
       names+=("$key"); printf '%3d) %s\n' "${#names[@]}" "$line"
     done < <(menu_lines)
     (( ${#names[@]} )) || echo "    (none yet)"
-    echo "  n) new workspace   s) settings   q) quit"
+    echo "  n) new workspace   l) arrange panes   s) settings   q) quit"
     read -r -p "Open which? (number; v<number> pane beside, h<number> pane below, d<number> delete): " n || return 0
     case "$n" in
       q|Q|"") return 0 ;;
       n|N) new_workspace tab ;;
       s|S) settings ;;
+      l|L) arrange_panes ;;
       [vh][0-9]*)
         local mode=vsplit; [[ "$n" == h* ]] && mode=hsplit
         n="${n#?}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace "$mode" "${names[$((n - 1))]}" ;;
@@ -830,12 +1023,13 @@ menu_plain() {
 
 case "${1:-}" in
   --list)    list_plain ;;
+  --arrange) arrange_panes; echo "$STATUS" ;;
   --preview) preview "${2:?}" ;;
   --entries) entries ;;
   --header)  STATUS="${SCRY_MENU_STATUS:-}"; menu_header ;;
   --watch)   watch_list ;;
   --update)  "$REPOMANCER" --update ;;
-  -h|--help) sed -n '2,28s/^# \{0,1\}//p' "$0" ;;
+  -h|--help) sed -n '2,31s/^# \{0,1\}//p' "$0" ;;
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac
