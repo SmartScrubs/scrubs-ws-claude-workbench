@@ -11,7 +11,9 @@
 #   ctrl-v   open it in a new iTerm2 pane beside the current one
 #   ctrl-h   open it in a new iTerm2 pane below the current one
 #   ctrl-n   new workspace (asks whether to start it in a new tab or a pane)
-#   ctrl-d   delete the workspace (asks first; moves it to the Trash)
+#   ctrl-d   delete the workspace (asks first; offers to delete its branch on
+#            GitHub too when no pull request is open or unmerged; the folder
+#            goes to the Trash)
 #   ctrl-s   settings
 #   esc      quit
 #
@@ -510,12 +512,73 @@ busy_in() {
     /^n/ { n = substr($0, 2); if (p != self && (n == d || index(n, d "/") == 1)) print c " (pid " p ")" }' || true
 }
 
+# git that never waits on a password prompt, and gives up soon on a dead network.
+git_net() {
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes -o ConnectTimeout=5" \
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+}
+
+# check_branch <dir>: whether the workspace's branch on GitHub may be deleted.
+# Only when no pull request was ever opened from it, or one was merged and
+# nothing was pushed or committed after it: the branch's last commit, on
+# GitHub and here, is still the pull request's last commit. Anything scry
+# can't check counts as no. Sets BRANCH to the branch when it's on GitHub (and
+# isn't the default branch, main or master), BRANCH_TIP to its last commit
+# there, and BRANCH_NOTE to why it can't be deleted (empty when it can).
+check_branch() {
+  local d="$1" default tip prs
+  BRANCH="" BRANCH_TIP="" BRANCH_NOTE=""
+  BRANCH="$(git -C "$d" branch --show-current 2>/dev/null || true)"
+  default="$(git -C "$d" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  case "$BRANCH" in ""|main|master|"${default#origin/}") BRANCH=""; return 0 ;; esac
+  # Ask GitHub itself: the local origin/<branch> may be out of date.
+  if ! tip="$(git_net -C "$d" ls-remote origin "refs/heads/$BRANCH" 2>/dev/null)"; then
+    BRANCH_NOTE="couldn't reach GitHub to check it"; return 0
+  fi
+  tip="${tip%%[[:space:]]*}"
+  [[ -n "$tip" ]] || { BRANCH=""; return 0; }   # not on GitHub
+  BRANCH_TIP="$tip"
+  if ! command -v gh >/dev/null 2>&1; then
+    BRANCH_NOTE="gh isn't installed, so its pull requests can't be checked"; return 0
+  fi
+  # One "STATE last-commit number" line per pull request opened from it.
+  if ! prs="$(cd "$d" && gh pr list --head "$BRANCH" --state all \
+                --json state,headRefOid,number --jq '.[] | "\(.state) \(.headRefOid) \(.number)"' 2>/dev/null)"; then
+    BRANCH_NOTE="gh couldn't list its pull requests"; return 0
+  fi
+  [[ -n "$prs" ]] || return 0
+  if grep -q '^OPEN ' <<<"$prs"; then
+    BRANCH_NOTE="it has an open pull request, #$(grep -m1 '^OPEN ' <<<"$prs" | cut -d' ' -f3)"
+  elif grep -q "^MERGED $tip " <<<"$prs"; then
+    # Here, HEAD must be that commit or behind it: nothing committed since.
+    git -C "$d" merge-base --is-ancestor HEAD "$tip" 2>/dev/null \
+      || BRANCH_NOTE="it has commits here made after its pull request was merged"
+  elif grep -q '^MERGED ' <<<"$prs"; then
+    BRANCH_NOTE="it has commits pushed after its pull request was merged"
+  else
+    BRANCH_NOTE="its pull request, #$(head -1 <<<"$prs" | cut -d' ' -f3), was closed without merging"
+  fi
+}
+
+# Delete a branch on GitHub, but only if its last commit is still the one
+# check_branch saw, so nothing pushed since is lost. Prints why it failed.
+delete_remote_branch() {  # <dir> <branch> <last commit>
+  local out
+  out="$(git_net -C "$1" push -q --force-with-lease="refs/heads/$2:$3" origin ":refs/heads/$2" 2>&1)" && return 0
+  [[ "$out" == *"remote ref does not exist"* ]] && return 0
+  if [[ "$out" == *"stale info"* ]]; then echo "something was pushed to it just now"
+  else printf '%s' "$out" | grep -m1 -E 'error|fatal' | sed 's/^[a-z]*: //' || true; fi
+  return 1
+}
+
 # Delete a workspace after asking. One that is committed and pushed takes a
-# yes; one with work that isn't on GitHub takes its name typed out. It goes to
-# the Trash (or is removed, where macOS has no trash command). The branch on
-# GitHub stays.
+# yes; one with work that isn't on GitHub takes its name typed out. If its
+# branch on GitHub may be deleted too (see check_branch), it then asks about
+# that, keeping it as the first choice. The branch goes first, so if that
+# fails the folder stays. The folder goes to the Trash (or is removed, where
+# macOS has no trash command).
 delete_workspace() {  # <name>
-  local name="$1" d="$ROOT/$1" busy changed unpushed stashes lost=() answer
+  local name="$1" d="$ROOT/$1" busy changed unpushed stashes lost=() answer kept="" err
   [[ -e "$d/.git" ]] || { STATUS="$name isn't a workspace."; return 0; }
   busy="$(busy_in "$(cd "$d" && pwd -P)" | paste -sd, - | sed 's/,/, /g')"
   if [[ -n "$busy" ]]; then
@@ -532,7 +595,14 @@ delete_workspace() {  # <name>
 
   clear_screen
   echo "${BOLD}Delete $name${RESET}  ${DIM}$(tilde "$d")${RESET}"
-  echo "The folder goes to the Trash. Its branch on GitHub stays."
+  echo "${DIM}Checking its branch on GitHub…${RESET}"
+  check_branch "$d"
+  printf '\033[1A\033[2K'   # replace the "Checking" line
+  echo "The folder goes to the Trash."
+  if [[ -n "$BRANCH_NOTE" ]]; then
+    kept=" Kept its branch $BRANCH on GitHub: $BRANCH_NOTE."
+    echo "${YELLOW}Its branch $BRANCH stays on GitHub: $BRANCH_NOTE.${RESET}"
+  fi
   if (( ${#lost[@]} )); then
     echo "${RED}It has work that isn't on GitHub: $(printf '%s, ' "${lost[@]}" | sed 's/, $//').${RESET}"
     answer="$(input "Type $name to delete it")" || { cancelled; return 0; }
@@ -542,12 +612,28 @@ delete_workspace() {  # <name>
     [[ "$(pick "Delete $name?" "No, cancel" "Yes, delete it")" == Yes* ]] || { cancelled; return 0; }
   fi
 
-  if command -v trash >/dev/null 2>&1; then
-    trash "$d" >/dev/null 2>&1 && STATUS="Moved $name to the Trash."
+  if [[ -n "$BRANCH" && -z "$BRANCH_NOTE" ]]; then
+    answer="$(pick "Also delete the branch $BRANCH on GitHub?" "No, keep it on GitHub" "Yes, delete it on GitHub too")"
+    [[ -n "$answer" ]] || { cancelled; return 0; }
+    [[ "$answer" == Yes* ]] || BRANCH=""
   else
-    rm -rf "$d" && STATUS="Deleted $name."
+    BRANCH=""
   fi
-  [[ ! -e "$d" ]] || STATUS="Couldn't delete $(tilde "$d")."
+  if [[ -n "$BRANCH" ]] && ! err="$(delete_remote_branch "$d" "$BRANCH" "$BRANCH_TIP")"; then
+    STATUS="Didn't delete $name: couldn't delete its branch on GitHub${err:+ ($err)}."
+    echo "$STATUS"; return 0
+  fi
+
+  if command -v trash >/dev/null 2>&1; then
+    trash "$d" >/dev/null 2>&1 && STATUS="Moved $name to the Trash"
+  else
+    rm -rf "$d" && STATUS="Deleted $name"
+  fi
+  if [[ -e "$d" ]]; then
+    STATUS="Couldn't delete $(tilde "$d")${BRANCH:+, but deleted its branch on GitHub}."
+  else
+    STATUS+="${BRANCH:+ and deleted its branch on GitHub}.$kept"
+  fi
   echo "$STATUS"
 }
 
@@ -749,7 +835,7 @@ case "${1:-}" in
   --header)  STATUS="${SCRY_MENU_STATUS:-}"; menu_header ;;
   --watch)   watch_list ;;
   --update)  "$REPOMANCER" --update ;;
-  -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0" ;;
+  -h|--help) sed -n '2,28s/^# \{0,1\}//p' "$0" ;;
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac
