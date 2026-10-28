@@ -8,7 +8,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
 |---|---|
 | `install.sh` | The interactive installer for a new Mac, usually run with the one-liner in the README. Each `step` installs one thing and skips it if it's already there, so it's safe to run again. |
 | `repomancer` | Clones `SmartScrubs/scrubs` into `<root>/<branch>`, creates the branch, installs the bundled Maven jars, copies an intent `AGENTS.md` from `SmartScrubs/agents-md`, and starts Claude Code as `ws+<branch>`. |
-| `scry` | An fzf menu of the workspaces that opens them in iTerm2 tabs or panes, with a plain menu when fzf is missing. |
+| `scry` | An fzf menu of the workspaces that opens them in iTerm2 tabs or panes, or moves them to the Trash, with a plain menu when fzf is missing. |
 
 ## How a change reaches people
 
@@ -46,9 +46,12 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   ```
   Then run it with `--yes`, `--dry-run`, or interactively.
 - **fzf menus and installer questions:** run them in a detached `tmux` session, send keys with `tmux send-keys` and read the screen with `tmux capture-pane -p`.
+  - Filter scry's list with `^name`: a plain query also matches the status column, so `clean` finds every clean workspace.
+  - Wait a second or so between keys: after an action the menu restarts, and keys sent too early go to the wrong prompt.
 - **Fakes:**
   - scry: a temporary `REPOMANCER_ROOT` with throwaway git repos.
   - Self-update: a local bare repo standing in for `origin`.
+  - Deleting a workspace that's in use: start `sleep 600` from inside the workspace folder.
   - VPN and nvm cases: stub commands on a reduced `PATH`.
   - Failure paths: run a step with `PATH=/usr/bin:/bin`, so `npx`, `uv` and `node` are missing.
 - **Real runs:** run the whole installer in an iTerm2 pane (open one with AppleScript: `split vertically with default profile`, then `write text`).
@@ -61,6 +64,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
 | Area | What to know |
 |---|---|
 | scry live refresh | The watcher polls every 2 s and sends fzf `reload-sync` through `--listen`. Its signature is the list of workspace folders plus the times of `.git/HEAD` and `.git/config`. It must **not** include the `.git` folder's own time: building the list runs `git status`, which changes that time, so the list reloaded every 2 s. `--track --id-nth=1` keeps the cursor on its workspace, but only fzf 0.66+ has it, so scry checks for it first. |
+| scry delete | To tell whether a workspace is in use, scry finds every process whose working folder is in it, using `/usr/sbin/lsof -d cwd` (about 0.4 s). It calls `lsof` by its full path: `/usr/sbin` can be missing from `PATH`, and then the check would find nothing and the workspace would be deleted anyway. A workspace counts as unpushed when any local branch has commits that aren't on `origin`, not just the branch it's on. It moves the folder with macOS's `trash` command and uses `rm -rf` only where that command doesn't exist. Claude Code's transcripts in `~/.claude/projects` stay. That's harmless: `repomancer` only resumes a session for a folder that already exists. |
 | Maven jars | The scrubs poms install `Libraries/*.jar` into `~/.m2` only during `mvn clean`, so `repomancer` runs `mvn -B -q -N clean` on just those poms. They're found with `git grep '<goal>install-file</goal>'`. |
 | VPN check | It looks at tunnel interfaces (`utun`, `ppp`, `ipsec`…) that have a real IPv4 address. It asks Cisco's `vpn state` only when a tunnel exists, because that command takes about 2 s. `scutil --nc list` is wrong for Cisco. `ALLOW_VPN=1` skips the check. |
 | nvm | Sourcing `nvm.sh` can exit the shell that sources it (e.g. when `NPM_CONFIG_PREFIX` is set), so the installer sources it in a subshell, only to find `npm`. |

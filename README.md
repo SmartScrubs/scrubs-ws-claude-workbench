@@ -61,6 +61,7 @@ scry --update  # update scry and repomancer now
 | <kbd>⌃V</kbd> | open it in a new iTerm2 pane beside the one `scry` runs in |
 | <kbd>⌃H</kbd> | open it in a new iTerm2 pane below the one `scry` runs in |
 | <kbd>⌃N</kbd> or **+ New workspace…** | asks for a branch, an optional base branch and an intent, then shows a summary and asks where to run `repomancer`: in a new tab, or in a pane beside or below the one `scry` runs in. The first choice is a new tab, or the pane you picked if you pressed <kbd>⌃V</kbd>/<kbd>⌃H</kbd> on **+ New workspace…**. If the workspace already exists, it offers to reopen it with the same choices. <kbd>Esc</kbd> cancels at any step; without fzf, type `q` |
+| <kbd>⌃D</kbd> | delete the workspace. If everything in it is committed and pushed, `scry` asks first, with "No, cancel" as the first choice. If it has uncommitted changes, unpushed commits or stashes, `scry` lists them and you type the workspace's name to delete it. The folder goes to the Trash, so you can still get it back. Its branch on GitHub stays. `scry` won't delete a workspace while something is still running in it, such as Claude Code or a shell in its tab. Without fzf, type `d` and the number |
 | <kbd>⌃S</kbd> or **⚙ Settings…** | change the workspace folder, default intent or repos (each one checked before saving), turn automatic updates or the Claude usage on or off, check for updates now, or open the config file in your editor |
 | <kbd>Esc</kbd> | quit |
 

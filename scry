@@ -11,6 +11,7 @@
 #   ctrl-v   open it in a new iTerm2 pane beside the current one
 #   ctrl-h   open it in a new iTerm2 pane below the current one
 #   ctrl-n   new workspace (asks whether to start it in a new tab or a pane)
+#   ctrl-d   delete the workspace (asks first; moves it to the Trash)
 #   ctrl-s   settings
 #   esc      quit
 #
@@ -499,6 +500,57 @@ new_workspace() {  # [tab|vsplit|hsplit]
   echo "$STATUS"
 }
 
+# --- deleting --------------------------------------------------------------
+# busy_in <real path>: "claude (pid 123)" for each process working in that
+# folder or below it, such as Claude Code or a shell left open in its tab.
+busy_in() {
+  /usr/sbin/lsof -nP -d cwd -Fpcn 2>/dev/null | awk -v d="$1" -v self="$$" '
+    /^p/ { p = substr($0, 2) }
+    /^c/ { c = substr($0, 2) }
+    /^n/ { n = substr($0, 2); if (p != self && (n == d || index(n, d "/") == 1)) print c " (pid " p ")" }' || true
+}
+
+# Delete a workspace after asking. One that is committed and pushed takes a
+# yes; one with work that isn't on GitHub takes its name typed out. It goes to
+# the Trash (or is removed, where macOS has no trash command). The branch on
+# GitHub stays.
+delete_workspace() {  # <name>
+  local name="$1" d="$ROOT/$1" busy changed unpushed stashes lost=() answer
+  [[ -e "$d/.git" ]] || { STATUS="$name isn't a workspace."; return 0; }
+  busy="$(busy_in "$(cd "$d" && pwd -P)" | paste -sd, - | sed 's/,/, /g')"
+  if [[ -n "$busy" ]]; then
+    STATUS="Didn't delete $name: it's in use by $busy. Quit Claude Code (and close its tab) first."
+    return 0
+  fi
+
+  changed="$(git -C "$d" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+  unpushed="$(git -C "$d" rev-list --count --branches --not --remotes=origin 2>/dev/null || echo 0)"
+  stashes="$(git -C "$d" stash list 2>/dev/null | wc -l | tr -d ' ')"
+  (( changed > 0 ))  && lost+=("$changed uncommitted change$( (( changed == 1 )) || echo s)")
+  (( unpushed > 0 )) && lost+=("$unpushed unpushed commit$( (( unpushed == 1 )) || echo s)")
+  (( stashes > 0 ))  && lost+=("$stashes stash$( (( stashes == 1 )) || echo es)")
+
+  clear_screen
+  echo "${BOLD}Delete $name${RESET}  ${DIM}$(tilde "$d")${RESET}"
+  echo "The folder goes to the Trash. Its branch on GitHub stays."
+  if (( ${#lost[@]} )); then
+    echo "${RED}It has work that isn't on GitHub: $(printf '%s, ' "${lost[@]}" | sed 's/, $//').${RESET}"
+    answer="$(input "Type $name to delete it")" || { cancelled; return 0; }
+    [[ "$answer" == "$name" ]] || { STATUS="Didn't delete $name: the name didn't match."; return 0; }
+  else
+    echo "Everything in it is committed and pushed."
+    [[ "$(pick "Delete $name?" "No, cancel" "Yes, delete it")" == Yes* ]] || { cancelled; return 0; }
+  fi
+
+  if command -v trash >/dev/null 2>&1; then
+    trash "$d" >/dev/null 2>&1 && STATUS="Moved $name to the Trash."
+  else
+    rm -rf "$d" && STATUS="Deleted $name."
+  fi
+  [[ ! -e "$d" ]] || STATUS="Couldn't delete $(tilde "$d")."
+  echo "$STATUS"
+}
+
 # --- settings --------------------------------------------------------------
 # set_config KEY [VALUE]: write KEY="VALUE" to the config file, replacing the
 # first KEY= line (commented out or not). No VALUE comments the setting out,
@@ -601,7 +653,7 @@ unset SCRY_STATUS
 # Short lines, so the help fits beside the preview pane.
 menu_header() {
   echo "enter tab · ^V pane beside · ^H pane below"
-  echo "^N new · ^S settings · esc quit"
+  echo "^N new · ^D delete · ^S settings · esc quit"
   echo "${DIM}$(tilde "$ROOT")${RESET}"
   claude_line
   [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
@@ -634,18 +686,22 @@ menu_fzf() {
     export SCRY_MENU_STATUS="$STATUS"   # for --header, when the watcher refreshes it
     out="$( entries \
       | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. ${live[@]+"${live[@]}"} \
-            --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-s \
+            --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-d,ctrl-s \
             --header="$(menu_header)" \
             --preview="[ {1} = $NEW_KEY ] || [ {1} = $SETTINGS_KEY ] || $(printf %q "$0") --preview {1}" \
             --preview-window='right,50%,<70(down,50%)' )" || return 0
     key="$(head -1 <<<"$out")"
     selection="$(sed -n 2p <<<"$out" | cut -f1)"
-    # ctrl-n / ctrl-s act wherever the cursor is; otherwise the row decides,
-    # and ctrl-v / ctrl-h choose where it opens.
+    # ctrl-n / ctrl-s act wherever the cursor is, ctrl-d only on a workspace;
+    # otherwise the row decides, and ctrl-v / ctrl-h choose where it opens.
     case "$key" in ctrl-v) mode=vsplit ;; ctrl-h) mode=hsplit ;; *) mode=tab ;; esac
     case "$key" in
       ctrl-n) new_workspace tab ;;
       ctrl-s) settings ;;
+      ctrl-d) case "$selection" in
+                ""|"$NEW_KEY"|"$SETTINGS_KEY") ;;
+                *) delete_workspace "$selection" ;;
+              esac ;;
       *) case "$selection" in
            "")              ;;
            "$NEW_KEY")      new_workspace "$mode" ;;
@@ -670,7 +726,7 @@ menu_plain() {
     done < <(menu_lines)
     (( ${#names[@]} )) || echo "    (none yet)"
     echo "  n) new workspace   s) settings   q) quit"
-    read -r -p "Open which? (number; v<number> pane beside, h<number> pane below): " n || return 0
+    read -r -p "Open which? (number; v<number> pane beside, h<number> pane below, d<number> delete): " n || return 0
     case "$n" in
       q|Q|"") return 0 ;;
       n|N) new_workspace tab ;;
@@ -678,6 +734,8 @@ menu_plain() {
       [vh][0-9]*)
         local mode=vsplit; [[ "$n" == h* ]] && mode=hsplit
         n="${n#?}"; (( n >= 1 && n <= ${#names[@]} )) && open_workspace "$mode" "${names[$((n - 1))]}" ;;
+      [dD][0-9]*)
+        n="${n#?}"; (( n >= 1 && n <= ${#names[@]} )) && delete_workspace "${names[$((n - 1))]}" ;;
       [0-9]*) (( n >= 1 && n <= ${#names[@]} )) && open_workspace tab "${names[$((n - 1))]}" ;;
       *) echo "?" ;;
     esac
@@ -691,7 +749,7 @@ case "${1:-}" in
   --header)  STATUS="${SCRY_MENU_STATUS:-}"; menu_header ;;
   --watch)   watch_list ;;
   --update)  "$REPOMANCER" --update ;;
-  -h|--help) sed -n '2,25s/^# \{0,1\}//p' "$0" ;;
+  -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0" ;;
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac
