@@ -23,7 +23,7 @@ If `~/Documents/AIProjects/my-feature` already exists, `repomancer my-feature` r
 
 ## Intents
 
-Each new workspace gets an `AGENTS.md` from the private [SmartScrubs/agents-md](https://github.com/SmartScrubs/agents-md) repo, which holds one per intent: `analyse`, `debug`, `feature`, `project`, `chores` and `default`. repomancer uses the first of these that's set:
+Each new workspace gets an `AGENTS.md` from the private [SmartScrubs/agents-md](https://github.com/SmartScrubs/agents-md) repo, which holds one per intent: `analyse`, `debug`, `feature`, `project`, `chores`, `jira` and `default`. `jira` is for issues from the Jira project FLGO: name the workspace after the issue, as in `repomancer FLGO-13 -i jira`, and Claude starts by reading that issue (or, under any other name, asks which FLGO issue to work on). It needs the Atlassian connector. repomancer uses the first of these that's set:
 
 1. `--intent debug` (or `-i debug`) on the command line
 2. `REPOMANCER_INTENT` in `~/.config/repomancer/config`, or as an environment variable
