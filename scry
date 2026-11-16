@@ -220,13 +220,15 @@ fzf_can_listen() {
 }
 
 # --- updates ---------------------------------------------------------------
-# Ask repomancer to update the clone both scripts live in (at most once an
-# hour, unless turned off), and restart scry if it did.
+# Ask repomancer to update the clone both scripts live in and our Claude Code
+# plugins (at most once an hour, unless turned off), and restart scry if it
+# updated itself. Plugin news only goes into the status line.
 check_updates() {
   local msg
   msg="$("$REPOMANCER" --update-if-due 2>/dev/null)" || return 0
   [[ -n "$msg" ]] || return 0
-  SCRY_STATUS="$msg" exec "$SELF"
+  [[ "$msg" != *"Updated repomancer"* ]] || SCRY_STATUS="$msg" exec "$SELF"
+  STATUS="$msg"
 }
 
 # --- Claude ----------------------------------------------------------------

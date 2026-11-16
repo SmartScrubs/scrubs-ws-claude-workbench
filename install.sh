@@ -8,7 +8,7 @@
 #   the explainer video toolchain (headless Chrome, Kokoro text-to-speech; asks first),
 #   Oh My Zsh (auto-updating), iTerm2, VS Code, Sublime Text (+ MarkdownPreview), Claude Code,
 #   Claude Code plugins (sentry, postman, superpowers, jdtls-lsp, aws-transform, comfy-cloud,
-#   video-explainers),
+#   and every plugin in our smartscrubs-ai-skills marketplace),
 #   AWS skills + AWS MCP server for Claude Code (via `aws configure agent-toolkit`),
 #   the Claude Code VS Code extension, and the `repomancer` and `scry` commands.
 #
@@ -56,8 +56,11 @@ PLUGINS=(
   jdtls-lsp@claude-plugins-official      # Java code intelligence; needs jdtls (Homebrew)
   aws-transform@claude-plugins-official  # AWS SDK and Java upgrades; installs its atx CLI when first used
   comfy-cloud@comfy-skills
-  video-explainers@smartscrubs-ai-skills
 )
+# Every plugin in this marketplace is installed, not just ones listed above.
+# repomancer does it (--sync-plugins), and again every hour, so plugins added
+# to the marketplace later reach everyone too.
+OWN_MARKETPLACE=smartscrubs-ai-skills
 # Claude Code only updates Anthropic's own marketplaces by itself; these get
 # auto-update turned on too, so fixes to our skills reach everyone.
 AUTO_UPDATE_MARKETPLACES=(smartscrubs-ai-skills)
@@ -829,6 +832,15 @@ else
     fi
   done
 
+  if [[ "$missing" == *" $OWN_MARKETPLACE "* ]]; then
+    :   # couldn't be added; already warned above
+  elif [[ -n "$DRY_RUN" ]]; then
+    echo "    + $SCRIPT_DIR/repomancer --sync-plugins  (every plugin from $OWN_MARKETPLACE)"
+  else
+    "$SCRIPT_DIR/repomancer" --sync-plugins 2>&1 | sed 's/^/    /' \
+      || warn "couldn't install the plugins from $OWN_MARKETPLACE"
+  fi
+
   # `marketplace add` records each marketplace in ~/.claude/settings.json;
   # Claude Code picks up an autoUpdate flag there the next time it starts.
   for name in "${AUTO_UPDATE_MARKETPLACES[@]}"; do
@@ -956,7 +968,7 @@ else
 # Repo with one intents/<name>/AGENTS.md per intent
 #REPOMANCER_AGENTS_REPO="https://github.com/SmartScrubs/agents-md.git"
 
-# Update repomancer and scry automatically, at most once an hour (default: yes)
+# Update repomancer, scry and our Claude Code plugins automatically, at most once an hour (default: yes)
 #REPOMANCER_AUTO_UPDATE="no"
 
 # scry: close the iTerm2 tab or pane when Claude Code exits (default: yes)

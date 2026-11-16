@@ -94,7 +94,7 @@ The first time `scry` opens a tab, macOS asks whether your terminal may control 
 | iTerm2, VS Code, Sublime Text | `brew install --cask`, plus the `code` and `subl` commands (linked into `~/.local/bin` if you installed the app by hand) |
 | Markdown preview for Sublime Text | Package Control plus the [MarkdownPreview](https://packagecontrol.io/packages/MarkdownPreview) package, which Package Control installs the next time Sublime starts |
 | Claude Code | official installer (`curl -fsSL https://claude.ai/install.sh \| bash`) |
-| Claude Code plugins: sentry, postman, superpowers, jdtls-lsp, aws-transform, comfy-cloud, video-explainers | jdtls-lsp gives Claude Java go-to-definition, find-references and compiler errors. aws-transform plans and runs upgrades such as AWS SDK for Java v1 → v2 and newer Java versions; it uses your AWS sign-in, installs AWS's `atx` CLI the first time it needs it, and sends usage telemetry to AWS unless you opt out. All installed with `claude plugin install` (from `claude-plugins-official`, `comfy-skills` and our private [`smartscrubs-ai-skills`](https://github.com/SmartScrubs/smartscrubs-ai-skills), which needs the GitHub sign-in; if git can't read it, the installer skips it and its plugin and says how to fix that). video-explainers has the `explainer-video` skill. Auto-update is turned on for `smartscrubs-ai-skills` (in `~/.claude/settings.json`), so skill fixes arrive without reinstalling |
+| Claude Code plugins: sentry, postman, superpowers, jdtls-lsp, aws-transform, comfy-cloud, and every plugin in our `smartscrubs-ai-skills` marketplace | jdtls-lsp gives Claude Java go-to-definition, find-references and compiler errors. aws-transform plans and runs upgrades such as AWS SDK for Java v1 → v2 and newer Java versions; it uses your AWS sign-in, installs AWS's `atx` CLI the first time it needs it, and sends usage telemetry to AWS unless you opt out. All installed with `claude plugin install` (from `claude-plugins-official`, `comfy-skills` and our private [`smartscrubs-ai-skills`](https://github.com/SmartScrubs/smartscrubs-ai-skills), which needs the GitHub sign-in; if git can't read it, the installer skips it and its plugins and says how to fix that). From our marketplace it installs all of them (e.g. video-explainers with the `explainer-video` skill, release-planning, ui-apps), and `repomancer` keeps them current: see [Updates](#updates) |
 | AWS skills and AWS MCP server for Claude Code | `aws configure agent-toolkit --yes` |
 | Claude Code extension for VS Code | `code --install-extension anthropic.claude-code` |
 | `repomancer` and `scry` commands | symlinks in `~/.local/bin`, which is added to `PATH` in `~/.zshrc` |
@@ -169,7 +169,7 @@ ln -s "$PWD/repomancer" ~/.local/bin/repomancer
 | `REPOMANCER_REPO` | `https://github.com/SmartScrubs/scrubs.git`  | Repo to clone               |
 | `REPOMANCER_INTENT` | `default` | Intent to use when `--intent` isn't given |
 | `REPOMANCER_AGENTS_REPO` | `https://github.com/SmartScrubs/agents-md.git` | Repo with the `AGENTS.md` files |
-| `REPOMANCER_AUTO_UPDATE` | `yes` | Whether `repomancer` and `scry` [update themselves](#updates) |
+| `REPOMANCER_AUTO_UPDATE` | `yes` | Whether `repomancer` and `scry` [update themselves](#updates) and our Claude Code plugins |
 | `SCRY_CLOSE_ON_EXIT` | `yes` | Whether `scry` closes the tab or pane when Claude Code exits |
 | `SCRY_SHOW_USAGE` | `yes` | Whether `scry` shows how much of your Claude plan limits you've used |
 
@@ -189,7 +189,9 @@ REPOMANCER_ROOT=~/scratch repomancer try-something
 
 `repomancer` and `scry` run from a clone of this repo (`~/tools/scrubs-ws-claude-workbench` when you installed with the one-liner), linked into `~/.local/bin`. At most once an hour, `repomancer` (when it opens a workspace) and `scry` (each time it shows its menu) fetch that clone. If there's a new version, they fast-forward the clone and restart, and `scry` shows what it updated to. A check that can't reach GitHub waits five seconds at most and is skipped until the next hour.
 
-They only update a clone that can be fast-forwarded: one with no uncommitted changes to tracked files and no commits of its own. Otherwise, `repomancer --update` tells you why and what to run. To update right away, run `repomancer --update` or `scry --update`, or use **Check for updates now** in `scry`'s settings. To turn automatic updates off, set `REPOMANCER_AUTO_UPDATE="no"` in `~/.config/repomancer/config`.
+The same hourly check keeps our Claude Code plugins current, in the background so the menu doesn't wait. It updates the `smartscrubs-ai-skills` marketplace, updates the plugins you have from it, and installs any plugin in it this Mac hasn't had yet, so new skills reach everyone within an hour of being merged. `scry` then shows what changed, e.g. `Claude plugins: installed ui-apps (restart Claude Code to load them)`. A plugin you uninstall stays uninstalled; the list of plugins this Mac has had is in `~/.cache/repomancer/plugins-seen`, and the last run's output in `~/.cache/repomancer/plugins.log`. To run it now, use `repomancer --update` (it takes about 15 seconds).
+
+They only update a clone that can be fast-forwarded: one with no uncommitted changes to tracked files and no commits of its own. Otherwise, `repomancer --update` tells you why and what to run. To update right away, run `repomancer --update` or `scry --update`, or use **Check for updates now** in `scry`'s settings. To turn automatic updates (including the plugins) off, set `REPOMANCER_AUTO_UPDATE="no"` in `~/.config/repomancer/config`.
 
 ## Cleaning up
 

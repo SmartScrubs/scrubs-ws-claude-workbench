@@ -8,8 +8,13 @@
 #   base-branch   branch to start from (default: the repo's default branch)
 #   --intent      which AGENTS.md to copy into the new workspace, from the agents
 #                 repo's intents/<intent>/AGENTS.md (case-insensitive)
-#   --update      update repomancer and scry now (they also check by themselves,
-#                 at most once an hour, unless REPOMANCER_AUTO_UPDATE=no)
+#   --update      update repomancer, scry and our Claude Code plugins now (they
+#                 also check by themselves, at most once an hour, unless
+#                 REPOMANCER_AUTO_UPDATE=no)
+#
+# Updating also installs every plugin in the smartscrubs-ai-skills marketplace
+# that this Mac hasn't had yet, and updates the ones already installed. A
+# plugin you uninstall stays uninstalled.
 #
 # If the workspace folder already exists, repomancer reopens it instead: it resumes the
 # most recent Claude session there, or starts a new one if there isn't one. Its
@@ -25,7 +30,7 @@
 #   REPOMANCER_REPO          repo to clone (default: https://github.com/SmartScrubs/scrubs.git)
 #   REPOMANCER_INTENT        intent to use when --intent isn't given (default: default)
 #   REPOMANCER_AGENTS_REPO   repo with the AGENTS.md files (default: https://github.com/SmartScrubs/agents-md.git)
-#   REPOMANCER_AUTO_UPDATE   update repomancer and scry automatically (default: yes)
+#   REPOMANCER_AUTO_UPDATE   update repomancer, scry and our plugins automatically (default: yes)
 
 # The whole script is one { … } block: bash reads all of it before running
 # anything, so editing or updating this file while it runs can't break it.
@@ -66,6 +71,8 @@ while [[ $# -gt 0 ]]; do
     --list-intents) LIST_INTENTS=1; shift ;;
     --update)      UPDATE=now; shift ;;
     --update-if-due) UPDATE=if-due; shift ;;   # used by scry
+    --sync-plugins) UPDATE=plugins; shift ;;   # used by install.sh and the hourly check
+    --sync-plugins=background) UPDATE=plugins-background; shift ;;
     -h|--help)     usage; exit 0 ;;
     --)            shift; ARGS+=("$@"); break ;;
     -*)            die "unknown option: $1 (see repomancer --help)" ;;
@@ -88,14 +95,17 @@ self_dir() {
   (cd "$(dirname "$p")" && pwd -P)
 }
 
-# self_update <now|if-due>: prints one line to stdout when it updated, nothing
-# otherwise. "now" also explains on stderr why it didn't; "if-due" is silent
-# and only checks when automatic updates are on and the last check is an
-# hour old.
+# self_update <now|if-due>: prints a line to stdout when it updated (starting
+# "Updated repomancer") or when the last background plugin sync changed
+# something, nothing otherwise. "now" also explains on stderr why it didn't
+# update, and syncs the plugins while you wait; "if-due" is silent, only checks
+# when automatic updates are on and the last check is an hour old, and syncs
+# the plugins in the background, since that takes several seconds.
 self_update() {
-  local mode="$1" dir stamp="$CACHE_DIR/last-update-check" behind
+  local mode="$1" stamp="$CACHE_DIR/last-update-check"
   say() { [[ "$mode" == if-due ]] || warn "$*"; }
   if [[ "$mode" == if-due ]]; then
+    if [[ -s "$PLUGINS_NEWS" ]]; then cat "$PLUGINS_NEWS"; rm -f "$PLUGINS_NEWS"; fi
     case "$AUTO_UPDATE" in no|false|0|off) return 0 ;; esac
     [[ -z "$JUST_UPDATED" ]] || return 0
     if [[ -f "$stamp" ]] && (( $(date +%s) - $(stat -f %m "$stamp") < UPDATE_INTERVAL )); then
@@ -103,6 +113,19 @@ self_update() {
     fi
   fi
   mkdir -p "$CACHE_DIR"; touch "$stamp"
+  update_clone
+  if [[ "$mode" == if-due ]]; then
+    # nohup: the sync goes on if the terminal closes; its own output goes to a
+    # log, so it doesn't hold up the caller's $(…).
+    nohup "$(self_dir)/repomancer" --sync-plugins=background \
+      >"$CACHE_DIR/plugins.log" 2>&1 </dev/null &
+  else
+    sync_plugins
+  fi
+}
+
+update_clone() {
+  local dir behind
   dir="$(self_dir)"
   if ! git -C "$dir" rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
     say "$dir isn't a git clone on a branch with an upstream; can't update"; return 0
@@ -125,10 +148,62 @@ self_update() {
   echo "Updated repomancer and scry to $(git -C "$dir" log -1 --format='%h %s')"
 }
 
-if [[ -n "$UPDATE" ]]; then
-  self_update "$UPDATE"
-  exit 0
-fi
+# --- Claude Code plugins ---------------------------------------------------
+# Every plugin in our marketplace gets installed once, so new skills reach
+# everyone; one that someone uninstalls isn't installed again.
+MARKETPLACE="smartscrubs-ai-skills"
+PLUGINS_SEEN="$CACHE_DIR/plugins-seen"   # plugins this Mac has had, one per line
+PLUGINS_NEWS="$CACHE_DIR/plugins-news"   # what a background sync changed, until shown
+
+# sync_plugins [background]: update the marketplace and its installed plugins,
+# and install the ones this Mac hasn't had. Prints each change; in the
+# background, also leaves a summary in PLUGINS_NEWS for scry to show.
+sync_plugins() {
+  local listing state id out added="" updated="" news=""
+  command -v claude >/dev/null 2>&1 || { warn "claude not found; skipping the plugins"; return 0; }
+  claude plugin marketplace update "$MARKETPLACE" >/dev/null 2>&1 \
+    || warn "couldn't update the $MARKETPLACE marketplace; using the copy on this Mac"
+  listing="$(claude plugin list --json --available 2>/dev/null | /usr/bin/python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for p in d.get("installed", []):
+    print("installed", p["id"])
+for p in d.get("available", []):
+    print("available", p["pluginId"])
+')" || { warn "couldn't list the Claude Code plugins"; return 0; }
+  mkdir -p "$CACHE_DIR"; touch "$PLUGINS_SEEN"
+  while read -r state id; do
+    [[ "$id" == *"@$MARKETPLACE" ]] || continue
+    if [[ "$state" == installed ]]; then
+      out="$(claude plugin update "$id" 2>&1)" || warn "couldn't update $id"
+      if [[ "$out" == *"updated from"* ]]; then
+        echo "updated ${id%@*}"; updated+="${updated:+, }${id%@*}"
+      fi
+    elif grep -qxF "$id" "$PLUGINS_SEEN"; then
+      continue   # installed before, then uninstalled
+    elif claude plugin install "$id" --scope user >/dev/null 2>&1; then
+      echo "installed ${id%@*}"; added+="${added:+, }${id%@*}"
+    else
+      warn "couldn't install $id"; continue
+    fi
+    grep -qxF "$id" "$PLUGINS_SEEN" || echo "$id" >> "$PLUGINS_SEEN"
+  done <<<"$listing"
+  if [[ -n "$added" ]]; then news="installed $added"; fi
+  if [[ -n "$updated" ]]; then news="${news:+$news; }updated $updated"; fi
+  if [[ -z "$news" ]]; then
+    echo "Claude plugins from $MARKETPLACE are up to date"
+  elif [[ "${1:-}" == background ]]; then
+    echo "Claude plugins: $news (restart Claude Code to load them)" > "$PLUGINS_NEWS"
+  else
+    echo "Restart Claude Code to load them."
+  fi
+}
+
+case "$UPDATE" in
+  now|if-due)         self_update "$UPDATE"; exit 0 ;;
+  plugins)            sync_plugins; exit 0 ;;
+  plugins-background) sync_plugins background; exit 0 ;;
+esac
 
 # --- agents repo -----------------------------------------------------------
 # A cached clone of the agents repo, refreshed on every run. If GitHub can't
@@ -174,8 +249,10 @@ command -v claude >/dev/null || die "claude CLI not found on PATH"
 # in memory, so this run isn't affected by the files changing underneath it.
 UPDATED="$(self_update if-due)"
 if [[ -n "$UPDATED" ]]; then
-  echo "→ $UPDATED"
-  REPOMANCER_UPDATED=1 exec "$0" "${ORIG_ARGS[@]}"
+  sed 's/^/→ /' <<<"$UPDATED"
+  if [[ "$UPDATED" == *"Updated repomancer"* ]]; then
+    REPOMANCER_UPDATED=1 exec "$0" "${ORIG_ARGS[@]}"
+  fi
 fi
 
 # Branch names may contain '/', which we don't want as nested directories.
