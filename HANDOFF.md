@@ -19,6 +19,7 @@ For whoever works on this repo next, person or agent. [README.md](README.md) exp
   - The fetch can't hang on a password prompt or a dead network: it uses BatchMode SSH, a 5 s connect timeout and a low-speed limit.
 - After an update, `repomancer` restarts itself, with `REPOMANCER_UPDATED` stopping it from looping. `scry` restarts and shows a status line.
 - So **pushing to `main` is a release**: everyone with auto-update on gets it within the hour. Installer changes only reach people who run the installer again.
+- To see which release someone runs, ask them for the line under scry's menu keys (`scry 2026-11-16 (b0447f9)`) or for `scry --version`. It's the date and commit of their clone when that scry started; a menu started before an update shows the older one until it restarts.
 - Both scripts wrap their whole body in `{ …; exit; }`. bash reads the file as it runs, so without that, updating a running script would break it.
 
 ## Conventions

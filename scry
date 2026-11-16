@@ -6,6 +6,7 @@
 #        scry --list       print the workspaces and exit
 #        scry --arrange    arrange the panes in this iTerm2 tab, then exit
 #        scry --update     update scry and repomancer now
+#        scry --version    print the date and commit of this scry
 #
 # In the menu:
 #   enter    open the workspace in a new iTerm2 tab (resumes its Claude session)
@@ -26,9 +27,10 @@
 #   SCRY_SHOW_USAGE      show how much of your Claude plan limits you've used
 #                        (default: yes)
 #
-# The menu also shows the model new Claude Code sessions start with. The list
-# refreshes by itself while the menu is open (with fzf 0.45 or later), and
-# scry restarts itself after updating (see REPOMANCER_AUTO_UPDATE).
+# The menu also shows the model new Claude Code sessions start with, and which
+# scry you're running (the date and commit of its clone). The list refreshes by
+# itself while the menu is open (with fzf 0.45 or later), and scry restarts
+# itself after updating (see REPOMANCER_AUTO_UPDATE).
 
 # The whole script is one { … } block: bash reads all of it before running
 # anything, so editing or updating this file while it runs can't break it.
@@ -87,6 +89,10 @@ self_dir() {
 SELF="$(self_dir)/scry"
 REPOMANCER="$(self_dir)/repomancer"
 [[ -x "$REPOMANCER" ]] || REPOMANCER=repomancer
+# Which scry this is: the date and commit its clone was at when it started
+# (scry reads all of itself then, so a later pull doesn't change what runs).
+# Empty when scry isn't run from a git clone.
+VERSION="$(git -C "$(self_dir)" log -1 --date=short --format='%cd (%h)' 2>/dev/null || true)"
 BOLD=$'\033[1m' DIM=$'\033[2m' RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m' RESET=$'\033[0m'
 
 # --- workspaces ------------------------------------------------------------
@@ -933,7 +939,7 @@ menu_header() {
   echo "enter tab · ^V pane beside · ^H pane below"
   echo "^N new · ^D delete · ^L arrange panes"
   echo "^S settings · esc quit"
-  echo "${DIM}$(tilde "$ROOT")${RESET}"
+  echo "${DIM}$(tilde "$ROOT")${VERSION:+ · scry $VERSION}${RESET}"
   claude_line
   [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
 }
@@ -962,7 +968,7 @@ menu_fzf() {
   while true; do
     check_updates
     export SCRY_SIGNATURE; SCRY_SIGNATURE="$(signature)"
-    export SCRY_MENU_STATUS="$STATUS"   # for --header, when the watcher refreshes it
+    export SCRY_MENU_STATUS="$STATUS" SCRY_MENU_VERSION="$VERSION"   # for --header, when the watcher refreshes it
     out="$( entries \
       | fzf --ansi --reverse --delimiter=$'\t' --with-nth=2.. ${live[@]+"${live[@]}"} \
             --prompt="scry > " --expect=ctrl-v,ctrl-h,ctrl-n,ctrl-d,ctrl-l,ctrl-s \
@@ -998,7 +1004,7 @@ menu_plain() {
     check_updates
     names=()
     clear_screen
-    echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $(tilde "$ROOT")${RESET}"
+    echo "${BOLD}repomancer workspaces${RESET} ${DIM}in $(tilde "$ROOT")${VERSION:+ · scry $VERSION}${RESET}"
     claude_line
     [[ -z "$STATUS" ]] || echo "${GREEN}$STATUS${RESET}"
     while IFS=$'\t' read -r key line; do
@@ -1028,10 +1034,11 @@ case "${1:-}" in
   --arrange) arrange_panes; echo "$STATUS" ;;
   --preview) preview "${2:?}" ;;
   --entries) entries ;;
-  --header)  STATUS="${SCRY_MENU_STATUS:-}"; menu_header ;;
+  --header)  STATUS="${SCRY_MENU_STATUS:-}" VERSION="${SCRY_MENU_VERSION-$VERSION}"; menu_header ;;
   --watch)   watch_list ;;
   --update)  "$REPOMANCER" --update ;;
-  -h|--help) sed -n '2,31s/^# \{0,1\}//p' "$0" ;;
+  --version) echo "scry ${VERSION:-(not run from a git clone, so the version is unknown)}" ;;
+  -h|--help) sed -n '2,33s/^# \{0,1\}//p' "$0" ;;
   "")        if [[ -n "$HAVE_FZF" ]]; then menu_fzf; else menu_plain; fi ;;
   *)         die "unknown option: $1 (see scry --help)" ;;
 esac

@@ -53,6 +53,7 @@ scry           # interactive menu
 scry --list    # just print the list
 scry --arrange # arrange the panes in this iTerm2 tab (see ⌃L)
 scry --update  # update scry and repomancer now
+scry --version # which scry this is: the date and commit of its clone
 ```
 
 | Key | Action |
@@ -187,7 +188,7 @@ REPOMANCER_ROOT=~/scratch repomancer try-something
 
 ## Updates
 
-`repomancer` and `scry` run from a clone of this repo (`~/tools/scrubs-ws-claude-workbench` when you installed with the one-liner), linked into `~/.local/bin`. At most once an hour, `repomancer` (when it opens a workspace) and `scry` (each time it shows its menu) fetch that clone. If there's a new version, they fast-forward the clone and restart, and `scry` shows what it updated to. A check that can't reach GitHub waits five seconds at most and is skipped until the next hour.
+`repomancer` and `scry` run from a clone of this repo (`~/tools/scrubs-ws-claude-workbench` when you installed with the one-liner), linked into `~/.local/bin`. At most once an hour, `repomancer` (when it opens a workspace) and `scry` (each time it shows its menu) fetch that clone. If there's a new version, they fast-forward the clone and restart, and `scry` shows what it updated to. The menu always shows which version it's running next to the workspace folder, e.g. `~/Documents/AIProjects · scry 2026-11-16 (b0447f9)`: the date and commit of the change it's at. A check that can't reach GitHub waits five seconds at most and is skipped until the next hour.
 
 The same hourly check keeps our Claude Code plugins current, in the background so the menu doesn't wait. It updates the `smartscrubs-ai-skills` marketplace, updates the plugins you have from it, and installs any plugin in it this Mac hasn't had yet, so new skills reach everyone within an hour of being merged. `scry` then shows what changed, e.g. `Claude plugins: installed ui-apps (restart Claude Code to load them)`. A plugin you uninstall stays uninstalled; the list of plugins this Mac has had is in `~/.cache/repomancer/plugins-seen`, and the last run's output in `~/.cache/repomancer/plugins.log`. To run it now, use `repomancer --update` (it takes about 15 seconds).
 
